@@ -1,6 +1,9 @@
-import type { Project, Selection, Wall, Room, Item, CatalogEntry, Opening, P } from './types';
+import type { Project, Selection, Wall, Room, CatalogEntry, P } from './types';
 import { uid, same, insetPolygon } from './geometry';
 import { CATALOG } from './catalog';
+import { newItemFromEntry } from './items';
+import { defaultRoomBaseboard } from './baseboards';
+import { attachToWall, radiatorUnderWindow } from './ops';
 
 const STORAGE_KEY = 'raumplaner.project.v1';
 
@@ -14,6 +17,7 @@ export function emptyProject(): Project {
     openings: [],
     rooms: [],
     items: [],
+    baseboards: [],
     wallMat: { kind: 'farbe', color: '#f4f1ec' },
     ceilingColor: '#ffffff',
     defaults: { wallHeight: 250, wallThickness: 15 },
@@ -64,8 +68,8 @@ export function demoProject(): Project {
   const inner: Wall = { id: uid(), a: { x: 535, y: 0 }, b: { x: 535, y: 435 }, thickness: 10, height: h };
   p.walls.push(inner);
   p.rooms = [
-    { id: uid(), name: 'Wohnen', points: [pts[0], pts[1], pts[4], pts[5]].map((q) => ({ ...q })), floor: { kind: 'eiche', color: '#ffffff' } },
-    { id: uid(), name: 'Schlafen', points: [pts[1], pts[2], pts[3], pts[4]].map((q) => ({ ...q })), floor: { kind: 'eiche_hell', color: '#ffffff' } },
+    { id: uid(), name: 'Wohnen', points: [pts[0], pts[1], pts[4], pts[5]].map((q) => ({ ...q })), floor: { kind: 'eiche', color: '#ffffff' }, baseboard: defaultRoomBaseboard() },
+    { id: uid(), name: 'Schlafen', points: [pts[1], pts[2], pts[3], pts[4]].map((q) => ({ ...q })), floor: { kind: 'eiche_hell', color: '#ffffff' }, baseboard: defaultRoomBaseboard() },
   ];
   const [top1, top2, right, bottom2, bottom1, left] = p.walls;
   p.openings = [
@@ -81,7 +85,7 @@ export function demoProject(): Project {
   const put = (id: string, x: number, y: number, rot = 0, z?: number) => {
     const e = CATALOG.find((c) => c.id === id);
     if (!e) return;
-    const it = newItemFromEntry(e, x, y);
+    const it = newItemFromEntry(e, x, y, p);
     it.rot = rot;
     if (z !== undefined) it.z = z;
     p.items.push(it);
@@ -104,6 +108,37 @@ export function demoProject(): Project {
   put('malmNacht', 834, 32);
   put('pax200', 873, 330, 90);
   put('lohals', 720, 260, 90);
+
+  // Haustechnik: an Wände setzen (s = Abstand ab Wandanfang, Seite +1 = zum Raum hin)
+  const onWall = (id: string, wall: Wall, s: number, side: 1 | -1 = 1, center?: number) => {
+    const e = CATALOG.find((c) => c.id === id);
+    if (!e) return;
+    const it = newItemFromEntry(e, 0, 0, p);
+    if (center !== undefined) it.z = it.mount = Math.max(0, center - it.h / 2);
+    attachToWall(it, wall, side, s);
+    p.items.push(it);
+  };
+  const atCeiling = (id: string, x: number, y: number) => {
+    const e = CATALOG.find((c) => c.id === id);
+    if (e) p.items.push(newItemFromEntry(e, x, y, p));
+  };
+  onWall('schalter', top1, 154); // neben der Eingangstür
+  onWall('steckdose2', top1, 200);
+  onWall('steckdose2', top1, 432);
+  onWall('steckdose1', inner, 345); // für die Leuchte auf dem KALLAX
+  onWall('thermostat', inner, 200);
+  onWall('tvdose', left, 120);
+  onWall('schalter', inner, 131.5, -1); // Schlafzimmer neben der Tür
+  onWall('steckdose1', top2, 41, 1, 70); // über den Nachttischen
+  onWall('steckdose1', top2, 329, 1, 70);
+  atCeiling('deckenauslass', 268, 217);
+  atCeiling('deckenauslass', 722, 217);
+  atCeiling('rauchmelder', 722, 300);
+  for (const o of p.openings) {
+    if (o.type !== 'window' || o.wallId === left.id || o.wallId === right.id) continue;
+    const r = radiatorUnderWindow(p, o);
+    if (r) p.items.push(r);
+  }
   return p;
 }
 
@@ -218,7 +253,8 @@ class Store {
       (s.kind === 'wall' && p.walls.some((w) => w.id === s.id)) ||
       (s.kind === 'opening' && p.openings.some((o) => o.id === s.id)) ||
       (s.kind === 'item' && p.items.some((o) => o.id === s.id)) ||
-      (s.kind === 'room' && p.rooms.some((o) => o.id === s.id));
+      (s.kind === 'room' && p.rooms.some((o) => o.id === s.id)) ||
+      (s.kind === 'baseboard' && p.baseboards.some((o) => o.id === s.id));
     if (!exists) this.select(null);
     else for (const l of this.selListeners) l();
   }
@@ -247,12 +283,8 @@ class Store {
   room(id: string) {
     return this.project.rooms.find((w) => w.id === id);
   }
-  selected<T extends NonNullable<Selection>['kind']>(kind: T): (T extends 'wall' ? Wall : T extends 'item' ? Item : T extends 'room' ? Room : Opening) | undefined {
-    const s = this.selection;
-    if (!s || s.kind !== kind) return undefined;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const map: any = { wall: this.wall(s.id), item: this.item(s.id), room: this.room(s.id), opening: this.opening(s.id) };
-    return map[kind];
+  baseboard(id: string) {
+    return this.project.baseboards.find((w) => w.id === id);
   }
 
   catalog(): CatalogEntry[] {
@@ -268,6 +300,7 @@ function migrate(p: Project): Project {
   out.rooms = out.rooms || [];
   out.items = (out.items || []).map((it) => ({ ...it, params: it.params || {} }));
   out.customCatalog = out.customCatalog || [];
+  out.baseboards = out.baseboards || [];
   return out;
 }
 
@@ -287,6 +320,8 @@ export function moveNode(p: Project, from: P, to: P, eps = 1) {
 export function deleteWall(p: Project, id: string) {
   p.walls = p.walls.filter((w) => w.id !== id);
   p.openings = p.openings.filter((o) => o.wallId !== id);
+  p.baseboards = p.baseboards.filter((b) => b.wallId !== id);
+  for (const r of p.rooms) if (r.baseboard?.skip) r.baseboard.skip = r.baseboard.skip.filter((x) => x !== id);
 }
 
 export function innerArea(r: Room, p: Project): P[] {
@@ -296,23 +331,4 @@ export function innerArea(r: Room, p: Project): P[] {
   return insetPolygon(r.points, t / 2);
 }
 
-export function newItemFromEntry(e: CatalogEntry, x: number, y: number): Item {
-  return {
-    id: uid(),
-    name: e.name,
-    catalogId: e.id,
-    type: e.type,
-    w: e.w,
-    d: e.d,
-    h: e.h,
-    color: e.color,
-    color2: e.color2,
-    finish: e.finish,
-    params: { ...e.params },
-    x,
-    y,
-    z: e.mount ?? 0,
-    mount: e.mount ?? 0,
-    rot: 0,
-  };
-}
+export { newItemFromEntry, ceilingHeight } from './items';

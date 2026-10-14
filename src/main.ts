@@ -4,13 +4,14 @@ import { Plan2D, type Tool } from './plan2d';
 import { View3D } from './view3d';
 import { h, download, openModal, closeModal, modalOpen } from './dom';
 import { renderRoomTab, renderFurnitureTab, renderMaterialTab, renderSunTab, findEntry, type Ctx } from './panels';
+import { renderTechTab } from './techui';
 import { initProps, duplicateItem } from './props';
 import { settings, stackedOn, rotateItemTo, moveItemTo } from './ops';
 import { ui, requestRedraw } from './shared';
 import { sunTimes, siteSun, fmtTime, compassName } from './sun';
 import type { Project } from './types';
 import { initPWA, isStandalone } from './pwa';
-import { initPanels, initMenu, initWallBar, initSelectionBar, initJoystick, afterInsert, saveProject, COARSE } from './touch';
+import { initPanels, initMenu, initWallBar, initSelectionBar, initJoystick, initPlaceBar, afterInsert, saveProject, COARSE } from './touch';
 
 const $ = (id: string) => document.getElementById(id)!;
 const statusEl = $('status');
@@ -27,6 +28,7 @@ const ctx: Ctx = { plan, view, status, afterInsert };
 // ------------------------------------------------------------- Seitenleiste
 renderRoomTab($('tab-raum'), ctx);
 renderFurnitureTab($('tab-moebel'), ctx);
+renderTechTab($('tab-technik'), ctx);
 renderMaterialTab($('tab-material'));
 renderSunTab($('tab-sonne'), ctx);
 initProps($('props'), ctx);
@@ -52,6 +54,9 @@ function setView(v: string) {
     view.resize();
   });
 }
+ctx.show2D = () => {
+  if (views.classList.contains('only3d')) setView('split');
+};
 $('viewSeg').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest('button');
   if (b?.dataset.view) setView(b.dataset.view);
@@ -105,7 +110,25 @@ tb2.append(
     ui.showDims = v;
     ui.showItemDims = v;
   }),
+  techSelect(),
 );
+
+/** Ebene „Technik“: Elektro/Wasser/Heizung anzeigen, hervorheben oder ausblenden. */
+function techSelect() {
+  const sel = h(
+    'select',
+    { class: 'techsel', title: 'Haustechnik (Steckdosen, Schalter, Wasser, Heizung) im Plan', id: 'techLayer' },
+    h('option', { value: 'show', selected: ui.tech === 'show' }, 'Technik: an'),
+    h('option', { value: 'focus' }, 'Technik: Elektroplan'),
+    h('option', { value: 'hide' }, 'Technik: aus'),
+  ) as HTMLSelectElement;
+  sel.addEventListener('change', () => {
+    ui.tech = sel.value as typeof ui.tech;
+    requestRedraw();
+    status(ui.tech === 'focus' ? 'Elektroplan: Möbel blass, Technik mit Montagehöhen (Dosenmitte in cm).' : ui.tech === 'hide' ? 'Haustechnik ausgeblendet.' : 'Haustechnik eingeblendet.');
+  });
+  return sel;
+}
 const fitBtn = h('button', { title: 'Alles zeigen', onclick: () => plan.fit() }) as HTMLButtonElement;
 fitBtn.innerHTML = icon('fit');
 tb2.append(h('div', { class: 'spacer' }), fitBtn);
@@ -298,8 +321,10 @@ function showHelp() {
           h('p', {}, 'Im Katalog anklicken (Einfügen in der Plan-Mitte) oder per Drag & Drop in 2D/3D ablegen. Möbel docken an Wände an; auf ein anderes Möbel gezogen, werden sie gestapelt. Drehen über den runden Griff, R-Taste oder rechts. „Möbel nach Maß“ baut beliebige Stücke als 3D-Modell.'),
         ),
         h('div', {},
-          h('h4', {}, '4 · Oberflächen'),
-          h('p', {}, 'Material & Farbe für alle Wände, einzelne Wände und jeden Boden.'),
+          h('h4', {}, '4 · Oberflächen & Fußleisten'),
+          h('p', {}, 'Material & Farbe für alle Wände, einzelne Wände und jeden Boden. Fußleisten je Raum rundum (Höhe, Tiefe, Profil, Farbe; Türen werden ausgespart, Wände abwählbar) oder als Einzelstücke mit eigener Länge – Wand anklicken → „+ Fußleisten-Stück“.'),
+          h('h4', {}, 'Haustechnik'),
+          h('p', {}, 'Tab „Technik“: Steckdosen, Schalter, Starkstrom, Netzwerk, Lichtauslässe, Rauchmelder, Wasseranschlüsse und Heizkörper antippen und dann auf Wände tippen. Höhen nach DIN 18015-3, rechts änderbar. „Technik: Elektroplan“ in der Werkzeugleiste zeigt einen Installationsplan mit Höhen.'),
           h('h4', {}, '5 · Licht & Sonne'),
           h('p', {}, 'Koordinaten des Hauses eingeben (z.B. aus Google Maps: Rechtsklick → Koordinaten kopieren) und Norden ausrichten – per Kompass im Plan oder Regler. Unter der 3D-Ansicht Datum und Uhrzeit wählen oder ▶ für den Tagesverlauf. Die Sonnenstunden-Karte zeigt, wo wie lange Sonne hinfällt.'),
           h('h4', {}, 'iPad & Touch'),
@@ -385,6 +410,7 @@ initPanels(() => {
 });
 initMenu();
 initWallBar(plan);
+initPlaceBar(plan);
 initSelectionBar(plan);
 initPWA(status);
 if (window.innerWidth < 700) setView('2d');

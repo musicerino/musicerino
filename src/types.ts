@@ -36,14 +36,42 @@ export interface Opening {
   frameColor?: string;
 }
 
+export type Finish = 'lack' | 'holz' | 'stoff' | 'metall' | 'glanz';
+
+export type BaseboardProfile = 'gerade' | 'rund' | 'klassisch';
+
+export interface BaseboardStyle {
+  height: number; // cm
+  depth: number; // cm (Stärke, ab Wandoberfläche)
+  color: string;
+  finish: Finish;
+  profile: BaseboardProfile;
+}
+
+/** Fußleiste rundum für einen Raum (folgt den Wänden automatisch, Türen werden ausgespart). */
+export interface RoomBaseboard extends BaseboardStyle {
+  on: boolean;
+  skip?: ID[]; // Wände, an denen keine Fußleiste sein soll
+  pieceLength?: number; // handelsübliche Stücklänge für die Bedarfsrechnung (cm)
+}
+
+/** Einzelnes Fußleisten-Stück an einer Wandseite (für geteilte / teilweise Fußleisten). */
+export interface Baseboard extends BaseboardStyle {
+  id: ID;
+  wallId: ID;
+  side: 1 | -1; // Wandseite (Richtung der Wand-Normalen)
+  start: number; // Abstand ab Wandanfang (Achse) in cm
+  length: number; // cm
+}
+
 export interface Room {
   id: ID;
   name: string;
   points: P[]; // Polygon auf Wandachsen
   floor: SurfaceMat;
+  baseboard?: RoomBaseboard | null;
+  floorHeating?: boolean;
 }
-
-export type Finish = 'lack' | 'holz' | 'stoff' | 'metall' | 'glanz';
 
 export type ModelType =
   | 'box'
@@ -84,7 +112,17 @@ export type ModelType =
   | 'wallshelf'
   | 'tv'
   | 'radiator'
-  | 'curtain';
+  | 'curtain'
+  // Haustechnik
+  | 'socket'
+  | 'switch'
+  | 'power'
+  | 'data'
+  | 'lightpoint'
+  | 'smoke'
+  | 'thermostat'
+  | 'water'
+  | 'distbox';
 
 export interface ItemSpec {
   type: ModelType;
@@ -106,6 +144,7 @@ export interface Item extends ItemSpec {
   z: number; // Unterkante über Boden
   rot: number; // Grad, im Uhrzeigersinn (Draufsicht)
   mount?: number; // Montagehöhe, wenn nicht gestapelt (z.B. Hängeschrank)
+  ceiling?: boolean; // an der Decke montiert (Deckenauslass, Rauchmelder)
   locked?: boolean;
 }
 
@@ -124,6 +163,7 @@ export interface CatalogEntry extends ItemSpec {
   desc: string;
   category: string;
   mount?: number;
+  ceiling?: boolean;
   custom?: boolean;
 }
 
@@ -134,6 +174,7 @@ export interface Project {
   openings: Opening[];
   rooms: Room[];
   items: Item[];
+  baseboards: Baseboard[];
   wallMat: SurfaceMat;
   ceilingColor: string;
   defaults: { wallHeight: number; wallThickness: number };
@@ -146,4 +187,5 @@ export type Selection =
   | { kind: 'opening'; id: ID }
   | { kind: 'item'; id: ID }
   | { kind: 'room'; id: ID }
+  | { kind: 'baseboard'; id: ID }
   | null;

@@ -8,6 +8,7 @@ import { duplicateItem } from './props';
 import type { Plan2D } from './plan2d';
 import type { View3D } from './view3d';
 import type { OpeningType } from './types';
+import { isTech } from './catalog';
 
 const $ = (id: string) => document.getElementById(id)!;
 const NARROW = window.matchMedia('(max-width: 1180px)');
@@ -171,11 +172,12 @@ export function initSelectionBar(plan: Plan2D) {
         const x = p.items.find((i) => i.id === s.id)!;
         rotateItemTo(x, x.rot + d, stackedOn(p, x));
       });
+      const tech = isTech(it.type);
       put(bar,
         h('span', { class: 'lbl' }, it.name.length > 22 ? it.name.slice(0, 21) + '…' : it.name),
-        h('button', { title: '90° nach links drehen', onclick: rot(-90) }, '⟲'),
-        h('button', { title: '15° drehen', onclick: rot(15) }, '15°'),
-        h('button', { title: '90° nach rechts drehen', onclick: rot(90) }, '⟳'),
+        tech ? null : h('button', { title: '90° nach links drehen', onclick: rot(-90) }, '⟲'),
+        tech ? null : h('button', { title: '15° drehen', onclick: rot(15) }, '15°'),
+        tech ? null : h('button', { title: '90° nach rechts drehen', onclick: rot(90) }, '⟳'),
         h('button', { onclick: () => duplicateItem(s.id) }, 'Kopie'),
         propsBtn,
         del,
@@ -198,6 +200,10 @@ export function initSelectionBar(plan: Plan2D) {
         propsBtn,
         del,
       );
+    } else if (s.kind === 'baseboard') {
+      const bp = store.baseboard(s.id);
+      if (!bp) return;
+      put(bar, h('span', { class: 'lbl' }, `Fußleiste ${fmtLen(bp.length)}`), propsBtn, del);
     } else {
       const label = s.kind === 'room' ? store.room(s.id)?.name ?? 'Raum' : 'Öffnung';
       put(bar, h('span', { class: 'lbl' }, label), propsBtn, s.kind === 'room' ? null : del);
@@ -216,6 +222,28 @@ export function initSelectionBar(plan: Plan2D) {
   COARSE.addEventListener('change', render);
   render();
   return render;
+}
+
+// ------------------------------------------------------------------ Platzieren (Stempel-Modus)
+
+export function initPlaceBar(plan: Plan2D) {
+  const bar = $('placebar');
+  const render = () => {
+    const show = plan.tool === 'place' && !!plan.placing;
+    bar.hidden = !show;
+    if (!show) return;
+    bar.innerHTML = '';
+    put(bar,
+      h('span', { class: 'lbl' }, `${plan.placing!.name}: ${plan.placing!.ceiling ? 'in den Raum' : 'auf eine Wand'} ${COARSE.matches ? 'tippen' : 'klicken'} – mehrfach möglich`),
+      h('button', { class: 'primary', onclick: () => plan.setTool('select') }, 'Fertig'),
+    );
+  };
+  const prev = plan.onToolChange;
+  plan.onToolChange = (t) => {
+    prev(t);
+    render();
+  };
+  render();
 }
 
 // ------------------------------------------------------------------ Joystick

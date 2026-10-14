@@ -54,12 +54,14 @@
         <nav class="tabs" id="tabs">
           <button data-tab="raum" class="active">Raum</button>
           <button data-tab="moebel">Möbel</button>
-          <button data-tab="material">Oberflächen</button>
-          <button data-tab="sonne">Licht &amp; Sonne</button>
+          <button data-tab="technik">Technik</button>
+          <button data-tab="material">Material</button>
+          <button data-tab="sonne">Sonne</button>
         </nav>
         <div class="tabpanels">
           <section class="tabpanel active" id="tab-raum"></section>
           <section class="tabpanel" id="tab-moebel"></section>
+          <section class="tabpanel" id="tab-technik"></section>
           <section class="tabpanel" id="tab-material"></section>
           <section class="tabpanel" id="tab-sonne"></section>
         </div>
@@ -71,6 +73,7 @@
           <div class="canvas-host" id="plan"></div>
           <div class="touchbar" id="wallbar" hidden></div>
           <div class="touchbar selbar" id="selbar" hidden></div>
+          <div class="touchbar" id="placebar" hidden></div>
         </div>
         <div class="pane pane3d" id="pane3d">
           <div class="toolbar" id="toolbar3d"></div>

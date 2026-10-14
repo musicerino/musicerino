@@ -1,7 +1,9 @@
 // Linke Seitenleiste: Raum, Möbel, Oberflächen, Licht & Sonne.
 import { store, chainWalls, innerArea, demoProject, emptyProject } from './store';
 import { h, put, numField, textField, selectField, openModal, closeModal } from './dom';
-import { CATALOG, CATEGORIES } from './catalog';
+import { CATALOG, CATEGORIES, TECH_CATEGORIES } from './catalog';
+import { baseboardEditor } from './techui';
+import { defaultRoomBaseboard } from './baseboards';
 import type { CatalogEntry, P, SurfaceMat } from './types';
 import { thumbnail } from './thumbs';
 import { FLOOR_MATERIALS, WALL_MATERIALS, presetPreview, findPreset, type MatPreset } from './textures';
@@ -17,6 +19,8 @@ export interface Ctx {
   view: View3D;
   status: (s: string) => void;
   afterInsert?: () => void;
+  /** 2D-Plan sichtbar machen (z.B. wenn nur 3D angezeigt wird) */
+  show2D?: () => void;
 }
 
 export function allEntries(): CatalogEntry[] {
@@ -104,7 +108,7 @@ export function renderRoomTab(el: HTMLElement, ctx: Ctx) {
     store.update((pp) => {
       const fresh = walls.filter((w) => !pp.walls.some((o) => (near(o.a, w.a) && near(o.b, w.b)) || (near(o.a, w.b) && near(o.b, w.a))));
       pp.walls.push(...fresh);
-      pp.rooms.push({ id, name: f.name || 'Raum', points: roomPts, floor: { kind: 'eiche', color: '#ffffff' } });
+      pp.rooms.push({ id, name: f.name || 'Raum', points: roomPts, floor: { kind: 'eiche', color: '#ffffff' }, baseboard: defaultRoomBaseboard() });
       pp.defaults.wallHeight = f.h;
       pp.defaults.wallThickness = f.t;
     });
@@ -226,6 +230,7 @@ export function renderFurnitureTab(el: HTMLElement, ctx: Ctx) {
   const renderGrid = () => {
     grid.innerHTML = '';
     const list = allEntries().filter((e) => {
+      if (!e.custom && TECH_CATEGORIES.includes(e.category)) return false; // eigener Tab „Technik“
       const ec = e.custom ? 'Meine Möbel' : e.category;
       if (cat !== 'Alle' && ec !== cat) return false;
       if (!q) return true;
@@ -348,6 +353,13 @@ export function renderMaterialTab(el: HTMLElement) {
           materialPicker(FLOOR_MATERIALS, room.floor, (m) => store.update((pp) => (pp.rooms.find((r) => r.id === roomId)!.floor = m)), TINT_COLORS),
           h('div', { class: 'btnrow' }, h('button', { onclick: () => store.update((pp) => pp.rooms.forEach((r) => (r.floor = { ...room.floor }))) }, 'Für alle Räume übernehmen')),
         ),
+        h('div', { class: 'card' },
+          h('h3', {}, `Fußleisten · ${room.name}`),
+          baseboardEditor(roomId),
+          room.baseboard?.on
+            ? h('div', { class: 'btnrow' }, h('button', { onclick: () => store.update((pp) => pp.rooms.forEach((r) => (r.baseboard = { ...(r.baseboard ?? defaultRoomBaseboard()), ...room.baseboard!, skip: r.id === room.id ? room.baseboard!.skip : r.baseboard?.skip ?? [] }))) }, 'Für alle Räume übernehmen'))
+            : null,
+        ),
       );
     } else el.append(h('p', { class: 'hint' }, 'Lege zuerst einen Raum an, um Böden zu gestalten.'));
     const ceil = h('input', { type: 'color', value: p.ceilingColor }) as HTMLInputElement;
@@ -358,7 +370,15 @@ export function renderMaterialTab(el: HTMLElement) {
   let key = '';
   const refresh = () => {
     const p = store.project;
-    const k = JSON.stringify([p.wallMat, p.rooms.map((r) => [r.id, r.name, r.floor]), p.ceilingColor, store.selection?.kind === 'room' ? store.selection.id : '']);
+    const k = JSON.stringify([
+      p.wallMat,
+      p.rooms.map((r) => [r.id, r.name, r.floor, r.baseboard, r.points]),
+      p.walls.map((w) => [w.a, w.b, w.thickness]),
+      p.openings.map((o) => [o.offset, o.width, o.sill]),
+      p.baseboards.length,
+      p.ceilingColor,
+      store.selection?.kind === 'room' ? store.selection.id : '',
+    ]);
     if (k !== key) {
       key = k;
       render();

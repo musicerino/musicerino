@@ -7,8 +7,10 @@ import { buildModel, disposeGroup } from './models';
 import { surfaceMaterial, setMaxAnisotropy, finishMaterial } from './textures';
 import { wallLength, same, bounds, pointInPolygon, projectOnSegment, perp, wallDir, sub, add, mul, cross } from './geometry';
 import { siteSun, planDirForBearing } from './sun';
-import { stackedOn, moveItemTo, settings, supportAt } from './ops';
-import type { CatalogEntry } from './types';
+import { stackedOn, moveItemTo, settings, supportAt, snapItemToWall, placementAt } from './ops';
+import type { CatalogEntry, BaseboardProfile } from './types';
+import { allRuns, type Run } from './baseboards';
+import { isTech } from './catalog';
 
 const S = 0.01; // cm → m
 
@@ -185,10 +187,52 @@ export class View3D {
     }
   }
 
+  /** Fußleisten-Profil (Querschnitt: Tiefe × Höhe) entlang der Länge extrudiert. */
+  private baseboardMesh(run: Run, t: number): THREE.Mesh {
+    const d = Math.max(0.002, run.style.depth * S);
+    const h = Math.max(0.005, run.style.height * S);
+    const len = Math.max(0.005, (run.s1 - run.s0) * S);
+    const sh = new THREE.Shape();
+    const profile: BaseboardProfile = run.style.profile;
+    sh.moveTo(0, 0);
+    sh.lineTo(d, 0);
+    if (profile === 'rund') {
+      const r = Math.min(d * 0.95, h * 0.5);
+      sh.lineTo(d, h - r);
+      sh.quadraticCurveTo(d, h, d - r, h);
+    } else if (profile === 'klassisch') {
+      sh.lineTo(d, h * 0.62);
+      sh.lineTo(d * 0.72, h * 0.66);
+      sh.quadraticCurveTo(d * 0.72, h * 0.86, d * 0.38, h * 0.9);
+      sh.lineTo(d * 0.38, h);
+    } else {
+      const c = Math.min(d * 0.35, 0.003);
+      sh.lineTo(d, h - c);
+      sh.lineTo(d - c, h);
+    }
+    sh.lineTo(0, h);
+    sh.closePath();
+    const geo = new THREE.ExtrudeGeometry(sh, { depth: len, bevelEnabled: false, curveSegments: 6 });
+    // Extrusionsrichtung auf die Wandrichtung drehen, Profil zur jeweiligen Wandseite
+    geo.rotateY(run.side === 1 ? -Math.PI / 2 : Math.PI / 2);
+    const mesh = new THREE.Mesh(geo, finishMaterial(run.style.finish, run.style.color));
+    mesh.position.set((run.side === 1 ? run.s1 : run.s0) * S, 0, (run.side * t) / 2);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.userData.baseboard = run.pieceId ?? run.roomId;
+    return mesh;
+  }
+
   private buildWalls(p: Project) {
     this.clearGroup(this.wallGroup);
     this.clearGroup(this.ceilGroup);
     this.wallMeshes = [];
+    const runsByWall = new Map<string, Run[]>();
+    for (const r of allRuns(p)) {
+      const list = runsByWall.get(r.wall.id) ?? [];
+      list.push(r);
+      runsByWall.set(r.wall.id, list);
+    }
     const pts = this.allPoints(p);
     if (pts.length) {
       const b = bounds(pts);
@@ -237,6 +281,7 @@ export class View3D {
       const g = new THREE.Group();
       g.add(mesh);
       for (const o of ops) g.add(this.buildOpening(o, t, w.height * S));
+      for (const run of runsByWall.get(w.id) ?? []) g.add(this.baseboardMesh(run, t));
       const ang = Math.atan2(w.b.y - w.a.y, w.b.x - w.a.x);
       g.position.set(w.a.x * S, 0, w.a.y * S);
       g.rotation.y = -ang;
@@ -361,7 +406,8 @@ export class View3D {
     const seen = new Set<string>();
     for (const it of p.items) {
       seen.add(it.id);
-      const key = JSON.stringify([it.type, it.w, it.d, it.h, it.color, it.color2, it.finish, it.params]);
+      // Heizkörper-Anschlussrohre hängen von der Montagehöhe ab
+      const key = JSON.stringify([it.type, it.w, it.d, it.h, it.color, it.color2, it.finish, it.params, it.type === 'radiator' ? it.z : 0]);
       let c = this.itemCache.get(it.id);
       if (!c || c.key !== key) {
         if (c) {
@@ -743,6 +789,8 @@ export class View3D {
       store.mutate((p) => {
         const it = p.items.find((i) => i.id === d.item.id)!;
         moveItemTo(p, it, x, y, d.children);
+        // Haustechnik bleibt an der Wand
+        if (isTech(it.type) && !it.ceiling) snapItemToWall(p, it, 60);
       });
       const it = store.item(d.item.id)!;
       const sup = supportAt(store.project, { x: it.x, y: it.y }, ex);
@@ -792,9 +840,13 @@ export class View3D {
       const entry = this.findEntry?.(id);
       const fp = this.floorPoint(e);
       if (!entry || !fp) return;
-      const it = newItemFromEntry(entry, Math.round(fp.x / S), Math.round(fp.z / S));
+      const it = newItemFromEntry(entry, Math.round(fp.x / S), Math.round(fp.z / S), store.project);
       store.update((p) => {
         p.items.push(it);
+        if (isTech(it.type)) {
+          placementAt(p, it, { x: it.x, y: it.y }, 80);
+          return;
+        }
         const sup = settings.stack ? supportAt(p, { x: it.x, y: it.y }, new Set([it.id])) : null;
         if (sup) it.z = sup.z + sup.h;
       });

@@ -9,6 +9,8 @@ export const ui = {
   heat: null as HeatData | null,
   showDims: true,
   showItemDims: true,
+  /** Haustechnik im Plan: anzeigen, hervorheben (Möbel blass) oder ausblenden */
+  tech: 'show' as 'show' | 'focus' | 'hide',
 };
 
 type Fn = () => void;

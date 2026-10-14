@@ -60,6 +60,30 @@ Die Datei `dist-single/index.html` läuft ohne Server: Doppelklick genügt, oder
 - Wände: Putz, Kalkputz, Backstein, Sichtbeton, Holzpaneele, Metro-Fliesen, Tapeten, Naturstein und Marmor. Farbe und Tönung sind frei wählbar. Du kannst sie für alle Wände oder für einzelne Wände festlegen.
 - Böden je Raum: Eiche, Nussbaum, Fischgrät, Dielen, Laminat, Fliesen, Schachbrett, Beton, Marmor, Terrazzo, Teppich und Vinyl.
 
+### Fußleisten
+- **Rundum je Raum:** Die Leiste folgt automatisch allen Wänden. Türen werden ausgespart, Innen- und Außenecken sauber geschlossen. Einzelne Wände lassen sich abwählen, z.B. die Küchen- oder Fliesenwand.
+- **Geteilt / teilweise:** Wand anklicken → „+ Fußleisten-Stück“. Jedes Stück hat eigene Werte für Abstand links und rechts, Länge, Höhe und Tiefe. Du kannst Stücke teilen (auch mit Lücke) oder im Plan entlang der Wand ziehen. „In Einzelstücke umwandeln“ macht aus der Rundum-Leiste bearbeitbare Stücke.
+- **Aussehen:** Profil gerade, abgerundet oder klassisch. Material und Farbe sind frei wählbar, dazu gibt es Vorlagen wie „Altbau 14 cm“ oder „Eiche 6 cm“.
+- **Bedarf:** Die App rechnet die Gesamtlänge und die Stückzahl in handelsüblicher Länge (+10 % Verschnitt) aus.
+- **Möbel stehen davor:** Möbel, die an die Wand andocken, stehen automatisch vor der Fußleiste.
+
+### Haustechnik (Tab „Technik“)
+- **Elektro:** Steckdosen (1–4-fach, USB, Feuchtraum), Licht- und Serienschalter, Dimmer, Starkstrom 400 V (Herdanschlussdose, CEE-Steckdose, Wallbox), Netzwerk-, TV- und Telefondosen, Decken- und Wandauslässe, Rauchmelder, Sicherungskasten und Medienverteiler.
+- **Wasser:** Kalt- und Warmwasser-Eckventile, Waschmaschinenanschluss, Abfluss DN 50 und Außenwasserhahn.
+- **Heizung:** Plattenheizkörper Typ 11/22/33, Flach-, Röhren-, Design- und Handtuchheizkörper (mit Thermostatventil und Anschlussrohren), Raumthermostat, Heizkreisverteiler und Fußbodenheizung je Raum.
+- **Setzen:** Element antippen, dann auf Wände tippen. Das geht mehrfach hintereinander (Stempel-Modus). Die Montagehöhe ist nach DIN 18015-3 voreingestellt (Dosenmitte über Fußboden) und lässt sich mit einem Tipp auf Vorlagen wie 30 / 105 / 115 cm ändern. Die Position gibst du als „Abstand links/rechts“ zur Innenecke ein.
+- **Schnell ergänzen:**
+  - Heizkörper unter alle Fenster, passend zur Fensterbreite und Brüstung
+  - Lichtschalter neben alle Türen (Griffseite)
+  - Rauchmelder in alle Räume
+
+  Einzelne Fenster und Türen haben dieselben Knöpfe.
+- **Plan:**
+  - Eigene Plansymbole mit Legende.
+  - „Technik: Elektroplan“ blendet die Möbel blass und zeigt die Montagehöhen.
+  - Eine Stückliste zählt alle Elemente samt Steckplätzen.
+  - Wandmontierte Technik wandert mit, wenn Wände verschoben werden.
+
 ### Licht & Sonne
 - Den **Standort** gibst du als Koordinaten ein, z.B. aus Google Maps: `52.52, 13.405` oder `52°31′N 13°24′O`. Alternativ wählst du eine Stadt oder den Gerätestandort. Dazu kommt die Zeitzone.
 - Die **Nordrichtung** stellst du ein, indem du die Kompassnadel im Plan drehst, oder über den Regler bzw. die Gradeingabe.
@@ -85,6 +109,9 @@ TypeScript, [Vite](https://vitejs.dev) und [three.js](https://threejs.org). Alle
 | `src/textures.ts` | Boden- und Wandmaterialien |
 | `src/sun.ts` | Sonnenstand und Zeitzonen |
 | `src/store.ts` | Projektzustand, Rückgängig, automatisches Speichern |
-| `src/panels.ts`, `src/props.ts`, `src/custom.ts` | Bedienoberfläche |
+| `src/baseboards.ts` | Fußleisten: Verlauf an den Wandoberflächen, Ecken, Türen, Bedarf |
+| `src/symbols.ts` | Plansymbole für Elektro, Wasser und Heizung |
+| `src/ops.ts` | Stapeln, Andocken an Wände, Platzieren von Haustechnik |
+| `src/panels.ts`, `src/props.ts`, `src/techui.ts`, `src/custom.ts`, `src/touch.ts` | Bedienoberfläche |
 
 > Hinweis: Die IKEA-Produktnamen dienen nur der Orientierung. Die Modelle sind vereinfachte Nachbildungen und keine offiziellen IKEA-Daten. Maße bitte vor dem Kauf beim Hersteller prüfen.

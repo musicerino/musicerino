@@ -106,6 +106,27 @@ export function checkbox(label: string, value: boolean, onChange: (v: boolean) =
   return h('label', { class: 'chk', title }, input, label);
 }
 
+/**
+ * Eingabe für einen Modell-Parameter. Beschriftungen wie „Art (0=LAN,1=TV)“ werden zur Auswahlliste,
+ * „… (0/1)“ zum Kontrollkästchen, alles andere zum Zahlenfeld.
+ */
+export function paramField(pp: { key: string; label: string; min: number; max: number; def: number }, value: number, onChange: (v: number) => void): HTMLElement {
+  const m = pp.label.match(/^(.*?)\s*\(([^()]*)\)\s*$/);
+  if (m && m[2] === '0/1') {
+    const input = h('input', { type: 'checkbox', checked: value > 0 }) as HTMLInputElement;
+    input.addEventListener('change', () => onChange(input.checked ? 1 : 0));
+    return h('label', { class: 'field' }, h('span', {}, m[1]), h('span', { class: 'chk', style: 'color:var(--text);display:flex;gap:6px;align-items:center;min-height:30px' }, input, 'ja'));
+  }
+  if (m && /^\d+\s*=/.test(m[2])) {
+    const options = m[2].split(',').map((part) => {
+      const [k, ...rest] = part.split('=');
+      return { value: k.trim(), label: rest.join('=').trim() };
+    });
+    return selectField(m[1], String(Math.round(value)), options, (v) => onChange(parseInt(v, 10)));
+  }
+  return numField(pp.label, value, (v) => onChange(Math.round(v)), { min: pp.min, max: pp.max, digits: 0 });
+}
+
 export function download(name: string, data: string, mime = 'application/json') {
   const a = document.createElement('a');
   a.href = data.startsWith('data:') ? data : URL.createObjectURL(new Blob([data], { type: mime }));

@@ -1,7 +1,7 @@
 // Dialog „Möbel nach Maß“: eigene Maße → prozedurales 3D-Modell.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { h, put, numField, textField, selectField, colorField, openModal, closeModal } from './dom';
+import { h, put, numField, paramField, textField, selectField, colorField, openModal, closeModal } from './dom';
 import { TYPE_INFO, FINISHES, CATALOG, COLORS } from './catalog';
 import type { CatalogEntry, Item, ItemSpec, ModelType, Finish } from './types';
 import { buildModel, disposeGroup } from './models';
@@ -113,7 +113,7 @@ export function openCustomFurniture(ctx: Ctx, edit?: Item) {
       ),
       numField('Montagehöhe über Boden (z.B. Hängeschrank)', spec.mount, (v) => (spec.mount = v), { unit: 'cm', min: 0, max: 500, length: true }),
       info.params?.length
-        ? h('div', {}, h('h4', {}, 'Aufbau'), h('div', { class: 'grid2' }, ...info.params.map((p) => numField(p.label, spec.params[p.key] ?? p.def, (v) => { spec.params[p.key] = Math.round(v); rebuild(); }, { min: p.min, max: p.max, digits: 0 }))))
+        ? h('div', {}, h('h4', {}, 'Aufbau'), h('div', { class: 'grid2' }, ...info.params.map((p) => paramField(p, spec.params[p.key] ?? p.def, (v) => { spec.params[p.key] = v; rebuild(); }))))
         : null,
       h('h4', {}, 'Aussehen'),
       selectField('Oberfläche', spec.finish, FINISHES.map((f) => ({ value: f.id, label: f.label })), (v) => { spec.finish = v as Finish; rebuild(); }),

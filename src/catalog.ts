@@ -55,6 +55,32 @@ export const CATEGORIES = [
   'Grundformen',
 ];
 
+/** Kategorien der Haustechnik (eigener Tab „Technik“). */
+export const TECH_CATEGORIES = ['Elektro', 'Wasser', 'Heizung'];
+
+/**
+ * Haustechnik-Eintrag. `center` = Montagehöhe der Dosenmitte über Fertigfußboden
+ * (so stehen die Höhen in der DIN 18015-3 und in Elektroplänen).
+ */
+function t(
+  id: string,
+  category: string,
+  name: string,
+  desc: string,
+  type: ModelType,
+  w: number,
+  d: number,
+  h: number,
+  center: number | 'decke',
+  params: Record<string, number> = {},
+  color = '#f6f6f4',
+  finish: Finish = 'glanz',
+  color2 = '#d9dbdc',
+): CatalogEntry {
+  const ceiling = center === 'decke';
+  return { id, category, name, desc, type, w, d, h, color, color2, finish, params, mount: ceiling ? 0 : Math.max(0, center - h / 2), ceiling: ceiling || undefined };
+}
+
 export const CATALOG: CatalogEntry[] = [
   // Wohnzimmer
   e('kivik3', 'Wohnzimmer', 'KIVIK 3er-Sofa', 'Hillared anthrazit', 'sofa', 228, 95, 83, C.anthrazit, 'stoff', { seats: 3, arm: 26, legs: 0 }),
@@ -154,8 +180,6 @@ export const CATALOG: CatalogEntry[] = [
   e('dusche', 'Bad', 'Dusche 90×90', 'mit Glaswand', 'shower', 90, 90, 200, '#f6f6f4', 'glanz', {}, C.chrom),
   e('wc', 'Bad', 'WC (wandhängend)', '37×54', 'toilet', 37, 54, 40, '#f6f6f4', 'glanz', { wall: 1 }),
   e('wcStand', 'Bad', 'Stand-WC mit Spülkasten', '37×68', 'toilet', 37, 68, 80, '#f6f6f4', 'glanz', {}),
-  e('heizkoerper', 'Bad', 'Heizkörper', '100×10×60', 'radiator', 100, 10, 60, '#f3f3f1', 'lack', {}, C.weiss, 15),
-  e('handtuchHk', 'Bad', 'Handtuchheizkörper', '60×5×120', 'radiator', 60, 5, 120, '#f3f3f1', 'lack', { towel: 1 }, C.weiss, 40),
 
   // Licht & Deko
   e('hektar', 'Licht & Deko', 'HEKTAR Stehleuchte', 'dunkelgrau', 'floorlamp', 40, 40, 181, C.anthrazit, 'metall', { shade: 1 }),
@@ -169,6 +193,48 @@ export const CATALOG: CatalogEntry[] = [
   e('bild100', 'Licht & Deko', 'Leinwandbild 100×70', 'Wand', 'picture', 100, 3, 70, C.eiche, 'holz', { canvas: 1 }, '#d4b483', 120),
   e('spiegelRund', 'Licht & Deko', 'Spiegel rund Ø60', 'Wand', 'mirror', 60, 3, 60, '#b8975a', 'metall', { round: 1 }, C.weiss, 140),
   e('vorhang', 'Licht & Deko', 'Vorhang', '145×250, leinen', 'curtain', 145, 8, 250, C.weissStoff, 'stoff'),
+
+  // ---------------------------------------------------------------- Haustechnik
+  // Elektro (Höhen = Dosenmitte über Fußboden, nach DIN 18015-3)
+  t('steckdose1', 'Elektro', 'Steckdose', 'Schuko, 1-fach · 30 cm', 'socket', 8, 1, 8, 30, { n: 1 }),
+  t('steckdose2', 'Elektro', 'Steckdose 2-fach', 'Schuko · 30 cm', 'socket', 15, 1, 8, 30, { n: 2 }),
+  t('steckdose3', 'Elektro', 'Steckdose 3-fach', 'Schuko · 30 cm', 'socket', 22, 1, 8, 30, { n: 3 }),
+  t('steckdoseKueche', 'Elektro', 'Steckdose 2-fach Küche', 'über der Arbeitsplatte · 115 cm', 'socket', 15, 1, 8, 115, { n: 2 }),
+  t('steckdoseUsb', 'Elektro', 'Steckdose mit USB', 'Schuko + 2× USB · 30 cm', 'socket', 8, 1, 8, 30, { n: 1, usb: 1 }),
+  t('steckdoseAussen', 'Elektro', 'Feuchtraum-/Außensteckdose', 'IP44 mit Klappdeckel · 105 cm', 'socket', 9, 5, 9, 105, { n: 1, outdoor: 1 }, '#e9eaea'),
+  t('schalter', 'Elektro', 'Lichtschalter', 'Aus-/Wechselschalter · 105 cm', 'switch', 8, 1, 8, 105, { n: 1 }),
+  t('serienschalter', 'Elektro', 'Serienschalter', '2 Wippen · 105 cm', 'switch', 8, 1, 8, 105, { n: 2 }),
+  t('dimmer', 'Elektro', 'Dimmer', 'Drehdimmer · 105 cm', 'switch', 8, 1.5, 8, 105, { n: 1, dimmer: 1 }),
+  t('herdanschluss', 'Elektro', 'Herdanschlussdose 400 V', 'Starkstrom für Herd/Kochfeld · 50 cm', 'power', 9, 2, 9, 50, { style: 0 }),
+  t('cee16', 'Elektro', 'CEE-Steckdose 400 V', 'Starkstrom 16 A, rot · 105 cm', 'power', 10, 9, 12, 105, { style: 1 }, '#8f9496', 'lack', '#d63c2f'),
+  t('wallbox', 'Elektro', 'Wallbox 11 kW', 'Ladestation E-Auto (400 V) · 120 cm', 'power', 22, 12, 32, 120, { style: 2 }, '#e9ebec', 'glanz', '#2b2d2f'),
+  t('lan', 'Elektro', 'Netzwerkdose (LAN)', '2× RJ45 · 30 cm', 'data', 8, 1.5, 8, 30, { kind: 0 }),
+  t('tvdose', 'Elektro', 'Antennendose TV/SAT', '30 cm', 'data', 8, 1.5, 8, 30, { kind: 1 }),
+  t('tae', 'Elektro', 'Telefondose (TAE)', '30 cm', 'data', 8, 1.5, 8, 30, { kind: 2 }),
+  t('deckenauslass', 'Elektro', 'Deckenauslass', 'Lampenanschluss an der Decke', 'lightpoint', 10, 10, 30, 'decke', { wall: 0 }),
+  t('wandauslass', 'Elektro', 'Wandauslass', 'Anschluss Wandleuchte · 180 cm', 'lightpoint', 12, 12, 12, 180, { wall: 1 }),
+  t('rauchmelder', 'Elektro', 'Rauchmelder', 'an der Decke, Raummitte', 'smoke', 10, 10, 4, 'decke'),
+  t('uv', 'Elektro', 'Sicherungskasten', 'Unterverteilung, 4-reihig · Mitte 150 cm', 'distbox', 55, 12, 80, 150, { kind: 0 }, '#eef0f0', 'lack'),
+  t('medienverteiler', 'Elektro', 'Medienverteiler', 'Netzwerk/Router · Mitte 150 cm', 'distbox', 40, 12, 60, 150, { kind: 2 }, '#eef0f0', 'lack'),
+
+  // Wasser
+  t('wasserKwWw', 'Wasser', 'Wasseranschluss kalt + warm', 'Eckventile für Spüle/Waschtisch · 55 cm', 'water', 20, 8, 6, 55, { kind: 0 }, C.chrom, 'metall'),
+  t('wasserKw', 'Wasser', 'Kaltwasseranschluss', 'Eckventil (z.B. WC, Kühlschrank) · 55 cm', 'water', 6, 8, 6, 55, { kind: 1 }, C.chrom, 'metall'),
+  t('wasserWw', 'Wasser', 'Warmwasseranschluss', 'Eckventil · 55 cm', 'water', 6, 8, 6, 55, { kind: 2 }, C.chrom, 'metall'),
+  t('wasserWm', 'Wasser', 'Waschmaschinenanschluss', 'Geräteventil + Abfluss-Siphon · 90 cm', 'water', 18, 9, 16, 90, { kind: 3 }, C.chrom, 'metall'),
+  t('abfluss', 'Wasser', 'Abfluss DN 50', 'Abwasser für Spüle/Waschtisch · 50 cm', 'water', 7, 6, 7, 50, { kind: 4 }, '#9aa0a4', 'lack'),
+  t('aussenhahn', 'Wasser', 'Außenwasserhahn', 'frostsicher · 70 cm', 'water', 8, 15, 10, 70, { kind: 5 }, C.chrom, 'metall'),
+
+  // Heizung (Höhe = Bodenabstand Unterkante)
+  e('hkTyp22', 'Heizung', 'Heizkörper Typ 22 · 60 × 100', 'Kompakt, 2 Platten · 10,2 cm tief', 'radiator', 100, 10.2, 60, '#f4f4f2', 'lack', { style: 0, plates: 2, valve: 1 }, C.weiss, 12),
+  e('hkTyp11', 'Heizung', 'Heizkörper Typ 11 · 60 × 80', '1 Platte · 6,1 cm tief', 'radiator', 80, 6.1, 60, '#f4f4f2', 'lack', { style: 0, plates: 1, valve: 1 }, C.weiss, 12),
+  e('hkTyp33', 'Heizung', 'Heizkörper Typ 33 · 60 × 120', '3 Platten · 15,5 cm tief', 'radiator', 120, 15.5, 60, '#f4f4f2', 'lack', { style: 0, plates: 3, valve: 1 }, C.weiss, 12),
+  e('hkNiedrig', 'Heizung', 'Flachheizkörper niedrig · 30 × 140', 'Typ 22, für bodentiefe Fenster', 'radiator', 140, 10.2, 30, '#f4f4f2', 'lack', { style: 0, plates: 2, valve: 1 }, C.weiss, 10),
+  e('heizkoerper', 'Heizung', 'Röhrenheizkörper · 60 × 100', '3-säulig, klassisch', 'radiator', 100, 10, 60, '#f4f4f2', 'lack', { style: 1, valve: 1 }, C.weiss, 12),
+  e('designHk', 'Heizung', 'Designheizkörper vertikal · 180 × 50', 'flach, anthrazit', 'radiator', 50, 8, 180, C.anthrazit, 'lack', { style: 3, valve: 1 }, C.weiss, 12),
+  e('handtuchHk', 'Heizung', 'Handtuchheizkörper · 120 × 60', 'für Bad', 'radiator', 60, 5, 120, '#f4f4f2', 'lack', { style: 2, valve: 1 }, C.weiss, 20),
+  t('thermostat', 'Heizung', 'Raumthermostat', 'mit Display · 150 cm', 'thermostat', 8.5, 2, 8.5, 150),
+  t('hkv', 'Heizung', 'Heizkreisverteiler', 'für Fußbodenheizung, im Kasten · ab 30 cm', 'distbox', 70, 11, 75, 67.5, { kind: 1 }, '#eef0f0', 'lack'),
 
   // Grundformen
   e('box', 'Grundformen', 'Quader', 'frei skalierbar', 'box', 60, 60, 60, C.hellgrau, 'lack'),
@@ -244,8 +310,92 @@ export const TYPE_INFO: Record<ModelType, { label: string; params?: { key: strin
   picture: { label: 'Bild / Rahmen' },
   wallshelf: { label: 'Wandboard' },
   tv: { label: 'Fernseher', params: [{ key: 'stand', label: 'Standfuß (0/1)', min: 0, max: 1, def: 1 }] },
-  radiator: { label: 'Heizkörper' },
+  radiator: {
+    label: 'Heizkörper',
+    params: [
+      { key: 'style', label: 'Bauart (0=Platte,1=Röhren,2=Handtuch,3=Design)', min: 0, max: 3, def: 0 },
+      { key: 'plates', label: 'Platten (Typ 11/22/33)', min: 1, max: 3, def: 2 },
+      { key: 'valve', label: 'Thermostatventil (0/1)', min: 0, max: 1, def: 1 },
+      { key: 'valveLeft', label: 'Ventil links (0/1)', min: 0, max: 1, def: 0 },
+    ],
+  },
   curtain: { label: 'Vorhang' },
+  socket: {
+    label: 'Steckdose',
+    params: [
+      { key: 'n', label: 'Fach (1–4)', min: 1, max: 4, def: 1 },
+      { key: 'usb', label: 'mit USB (0/1)', min: 0, max: 1, def: 0 },
+      { key: 'outdoor', label: 'Klappdeckel IP44 (0/1)', min: 0, max: 1, def: 0 },
+    ],
+  },
+  switch: {
+    label: 'Lichtschalter',
+    params: [
+      { key: 'n', label: 'Wippen (1–3)', min: 1, max: 3, def: 1 },
+      { key: 'dimmer', label: 'Dimmer (0/1)', min: 0, max: 1, def: 0 },
+    ],
+  },
+  power: { label: 'Starkstrom 400 V', params: [{ key: 'style', label: 'Art (0=Herdanschluss,1=CEE,2=Wallbox)', min: 0, max: 2, def: 0 }] },
+  data: { label: 'Daten-/Antennendose', params: [{ key: 'kind', label: 'Art (0=LAN,1=TV/SAT,2=Telefon)', min: 0, max: 2, def: 0 }] },
+  lightpoint: { label: 'Lichtauslass', params: [{ key: 'wall', label: 'an der Wand (0=Decke,1=Wand)', min: 0, max: 1, def: 0 }] },
+  smoke: { label: 'Rauchmelder' },
+  thermostat: { label: 'Raumthermostat' },
+  water: {
+    label: 'Wasser-/Abwasseranschluss',
+    params: [{ key: 'kind', label: 'Art (0=KW+WW,1=KW,2=WW,3=Waschm.,4=Abfluss,5=Außenhahn)', min: 0, max: 5, def: 0 }],
+  },
+  distbox: { label: 'Verteilerkasten', params: [{ key: 'kind', label: 'Art (0=Sicherungen,1=Heizkreis,2=Medien)', min: 0, max: 2, def: 0 }] },
+};
+
+/** Haustechnik: wird nicht gestapelt, sitzt an Wand oder Decke und gehört zur Ebene „Technik“. */
+export const TECH_TYPES = new Set<ModelType>(['socket', 'switch', 'power', 'data', 'lightpoint', 'smoke', 'thermostat', 'water', 'distbox', 'radiator']);
+/** Wird im Grundriss als Plansymbol statt als Umriss gezeichnet. */
+export const SYMBOL_TYPES = new Set<ModelType>(['socket', 'switch', 'power', 'data', 'lightpoint', 'smoke', 'thermostat', 'water']);
+export const isTech = (t: ModelType) => TECH_TYPES.has(t);
+
+/** Gewerk eines Technik-Elements (für Farben, Legende und Stückliste). */
+export function trade(type: ModelType, params: Record<string, number> = {}): 'Elektro' | 'Wasser' | 'Heizung' {
+  if (type === 'water') return 'Wasser';
+  if (type === 'radiator' || type === 'thermostat' || (type === 'distbox' && params.kind === 1)) return 'Heizung';
+  return 'Elektro';
+}
+
+/** Übliche Montagehöhen (Dosenmitte, cm). Heizkörper: Bodenabstand der Unterkante. */
+export const HEIGHT_PRESETS: Partial<Record<ModelType, { label: string; v: number }[]>> = {
+  socket: [
+    { label: 'Wohnraum 30', v: 30 },
+    { label: 'Bad/Flur 105', v: 105 },
+    { label: 'Arbeitsplatte 115', v: 115 },
+  ],
+  switch: [
+    { label: 'Standard 105', v: 105 },
+    { label: 'barrierefrei 85', v: 85 },
+  ],
+  data: [
+    { label: 'Standard 30', v: 30 },
+    { label: 'Schreibtisch 105', v: 105 },
+  ],
+  power: [
+    { label: 'Herd 50', v: 50 },
+    { label: 'Garage 105', v: 105 },
+    { label: 'Wallbox 120', v: 120 },
+  ],
+  lightpoint: [
+    { label: 'Wandleuchte 180', v: 180 },
+    { label: 'über Spiegel 200', v: 200 },
+  ],
+  thermostat: [{ label: 'Standard 150', v: 150 }],
+  water: [
+    { label: 'Waschtisch/Spüle 55', v: 55 },
+    { label: 'WC-Spülkasten 80', v: 80 },
+    { label: 'Waschmaschine 90', v: 90 },
+  ],
+  distbox: [{ label: 'Mitte 150', v: 150 }],
+  radiator: [
+    { label: 'Boden 10', v: 10 },
+    { label: 'Boden 12', v: 12 },
+    { label: 'Boden 15', v: 15 },
+  ],
 };
 
 export const FINISHES: { id: Finish; label: string }[] = [

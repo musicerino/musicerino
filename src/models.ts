@@ -39,6 +39,15 @@ class Builder {
     return mesh;
   }
 
+  /** Runde Scheibe mit Blickrichtung +z (Mittelpunkt x/y, Vorderseite bei z). */
+  disc(r: number, thick: number, m: M, x: number, y: number, z: number, seg = 24): THREE.Mesh {
+    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(r, r, thick, seg), m);
+    mesh.rotation.x = Math.PI / 2;
+    mesh.position.set(x, y, z - thick / 2);
+    this.g.add(mesh);
+    return mesh;
+  }
+
   sphere(r: number, m: M, x: number, y: number, z: number, sx = 1, sy = 1, sz = 1): THREE.Mesh {
     const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 12), m);
     mesh.position.set(x, y, z);
@@ -49,6 +58,12 @@ class Builder {
 }
 
 const P = (spec: ItemSpec, k: string, def: number) => (spec.params && spec.params[k] !== undefined ? spec.params[k] : def);
+
+/** Höhe der Unterkante über dem Boden (m), falls bekannt – z.B. für Heizkörper-Anschlussrohre. */
+function baseHeight(spec: ItemSpec): number {
+  const s = spec as ItemSpec & { z?: number; mount?: number };
+  return Math.max(0, (s.z ?? s.mount ?? 0) / 100);
+}
 
 export function buildModel(spec: ItemSpec): THREE.Group {
   const W = Math.max(0.01, spec.w / 100);
@@ -784,7 +799,10 @@ const GENERATORS: Partial<Record<ItemSpec['type'], Gen>> & { box: Gen } = {
   },
 
   radiator(b, s, W, D, H, m1) {
-    if (P(s, 'towel', 0) > 0) {
+    const style = P(s, 'towel', 0) > 0 ? 2 : P(s, 'style', 0);
+    const white = finishMaterial('lack', '#f2f2f0');
+    if (style === 2) {
+      // Handtuchheizkörper
       for (const sx of [-1, 1]) b.cyl(0.015, 0.015, H, m1, sx * (W / 2 - 0.015), 0, 0, 10);
       const n = Math.max(3, Math.round(H / 0.06));
       for (let i = 0; i < n; i++) {
@@ -792,11 +810,251 @@ const GENERATORS: Partial<Record<ItemSpec['type'], Gen>> & { box: Gen } = {
         bar.rotation.z = Math.PI / 2;
         bar.position.set(0, 0.04 + (i * (H - 0.08)) / (n - 1), 0);
       }
+    } else if (style === 1) {
+      // Röhrenheizkörper (Glieder mit 2–4 Rohren in der Tiefe)
+      const k = Math.max(2, Math.min(4, Math.round(D / 0.035)));
+      const n = Math.max(3, Math.round(W / 0.046));
+      const r = Math.min(0.0125, D / (k * 2.4));
+      for (let i = 0; i < n; i++) {
+        const x = -W / 2 + (i + 0.5) * (W / n);
+        for (let j = 0; j < k; j++) {
+          const z = -D / 2 + r + (j * (D - 2 * r)) / Math.max(1, k - 1);
+          b.cyl(r, r, H - 0.06, m1, x, 0.03, z, 8);
+        }
+        b.box(W / n - 0.004, 0.035, D, m1, x, 0, 0, 0.01);
+        b.box(W / n - 0.004, 0.035, D, m1, x, H - 0.035, 0, 0.01);
+      }
+    } else if (style === 3) {
+      // Designheizkörper: flache Front
+      b.box(W - 0.02, H - 0.02, Math.max(0.01, D - 0.03), finishMaterial('lack', '#3a3c3e'), 0, 0.01, -0.015);
+      b.box(W, H, 0.025, m1, 0, 0, D / 2 - 0.0125, 0.006);
+      for (let i = 1; i < 6; i++) b.box(W - 0.04, 0.003, 0.002, finishMaterial('lack', '#2f3133'), 0, (H * i) / 6, D / 2 + 0.001);
+    } else {
+      // Plattenheizkörper (Kompakt): Typ 11/22/33 = 1–3 Platten
+      const plates = Math.max(1, Math.min(3, P(s, 'plates', Math.round(D / 0.05) || 2)));
+      const pt = 0.018;
+      for (let i = 0; i < plates; i++) {
+        const z = plates === 1 ? 0 : -D / 2 + pt / 2 + (i * (D - pt)) / (plates - 1);
+        b.box(W, H - (plates > 1 ? 0.012 : 0), pt, m1, 0, 0, z, 0.004);
+      }
+      // Profilierung der Frontplatte
+      const zf = plates === 1 ? pt / 2 : D / 2;
+      const nG = Math.max(4, Math.round(W / 0.05));
+      for (let i = 0; i < nG; i++) b.box(0.006, H - 0.05, 0.003, m1, -W / 2 + (i + 0.5) * (W / nG), 0.025, zf + 0.0005);
+      if (plates > 1) {
+        // Abdeckgitter oben und Seitenblenden
+        b.box(W, 0.008, D, m1, 0, H - 0.012, 0);
+        for (let i = 0; i < Math.round(W / 0.012); i++) b.box(0.004, 0.002, D - 0.02, finishMaterial('lack', '#c9cacb'), -W / 2 + 0.01 + i * 0.012, H - 0.004, 0);
+        for (const sx of [-1, 1]) b.box(0.006, H - 0.012, D, m1, sx * (W / 2 - 0.003), 0, 0);
+      }
+    }
+    // Thermostatventil und Anschlussrohre
+    if (P(s, 'valve', 1) > 0 && style !== 2) {
+      const sx = P(s, 'valveLeft', 0) > 0 ? -1 : 1;
+      const vy = style === 3 ? 0.08 : H - 0.09;
+      const head = b.cyl(0.025, 0.025, 0.07, white, 0, 0, 0, 20);
+      head.rotation.z = Math.PI / 2;
+      head.position.set(sx * (W / 2 + 0.045), vy, Math.min(0, D / 2 - 0.04));
+      const neck = b.cyl(0.012, 0.012, 0.03, finishMaterial('metall', '#cfd2d4'), 0, 0, 0, 12);
+      neck.rotation.z = Math.PI / 2;
+      neck.position.set(sx * (W / 2 + 0.005), vy, Math.min(0, D / 2 - 0.04));
+    }
+    const zb = baseHeight(s);
+    if (zb > 0.02 && style !== 3) {
+      const sx = P(s, 'valveLeft', 0) > 0 ? -1 : 1;
+      for (const dx of [0.03, 0.08]) b.cyl(0.008, 0.008, zb + 0.02, white, sx * (W / 2 - dx), -zb, -D / 2 + 0.012, 10);
+    }
+  },
+
+
+  // ------------------------------------------------------------ Haustechnik
+  socket(b, s, W, D, H, m1) {
+    const n = Math.max(1, Math.min(4, P(s, 'n', 1)));
+    const outdoor = P(s, 'outdoor', 0) > 0;
+    const plateD = outdoor ? D * 0.55 : Math.min(D, 0.01);
+    const back = -D / 2;
+    const u = W / n;
+    const ring = finishMaterial('glanz', shadeOf(s.color, -0.05));
+    const black = finishMaterial('lack', '#1d1e20');
+    const metal = finishMaterial('metall', '#bfc3c6');
+    for (let i = 0; i < n; i++) {
+      const x = -W / 2 + u * (i + 0.5);
+      b.box(u - 0.002, H, plateD, m1, x, 0, back + plateD / 2, Math.min(0.004, plateD / 2.2));
+      const zf = back + plateD;
+      b.disc(Math.min(0.026, u * 0.34), 0.002, ring, x, H / 2, zf + 0.002, 28);
+      for (const dx of [-0.0095, 0.0095]) b.disc(0.0024, 0.001, black, x + dx, H / 2, zf + 0.0025, 10);
+      for (const dy of [-0.021, 0.021]) b.box(0.008, 0.0025, 0.002, metal, x, H / 2 + dy - 0.00125, zf + 0.002);
+      if (P(s, 'usb', 0) > 0) for (const dx of [-0.008, 0.008]) b.box(0.007, 0.003, 0.001, black, x + dx, 0.008, zf + 0.0005);
+    }
+    if (outdoor) {
+      // Klappdeckel
+      const lid = b.box(W - 0.004, H * 0.92, D - plateD, m1, 0, H * 0.04, back + plateD + (D - plateD) / 2, 0.006);
+      lid.rotation.x = -0.05;
+      b.box(W * 0.5, 0.004, 0.002, finishMaterial('lack', '#9aa0a3'), 0, H * 0.12, D / 2 + 0.001);
+    }
+  },
+
+  switch(b, s, W, D, H, m1) {
+    const plateD = Math.min(D, 0.01);
+    const back = -D / 2;
+    b.box(W, H, plateD, m1, 0, 0, back + plateD / 2, 0.004);
+    const zf = back + plateD;
+    if (P(s, 'dimmer', 0) > 0) {
+      b.disc(0.021, Math.max(0.006, D - plateD), finishMaterial('glanz', shadeOf(s.color, -0.06)), 0, H / 2, D / 2, 28);
+      b.box(0.003, 0.012, 0.001, finishMaterial('lack', '#8a8d90'), 0, H / 2 + 0.006, D / 2 + 0.0005);
       return;
     }
-    b.box(W, H, D * 0.6, m1, 0, 0, -D * 0.2);
-    const n = Math.max(4, Math.round(W / 0.05));
-    for (let i = 0; i < n; i++) b.box(0.03, H - 0.04, D * 0.4, m1, -W / 2 + 0.025 + (i * (W - 0.05)) / (n - 1), 0.02, D * 0.3 - 0.01);
+    const n = Math.max(1, Math.min(3, P(s, 'n', 1)));
+    const total = Math.min(0.056, W * 0.72);
+    const rw = (total - (n - 1) * 0.002) / n;
+    const rock = finishMaterial('glanz', shadeOf(s.color, -0.03));
+    for (let i = 0; i < n; i++) {
+      const x = -total / 2 + rw / 2 + i * (rw + 0.002);
+      const r = b.box(rw, Math.min(0.056, H * 0.72), 0.006, rock, x, (H - Math.min(0.056, H * 0.72)) / 2, zf + 0.003, 0.002);
+      r.rotation.x = 0.06;
+    }
+  },
+
+  power(b, s, W, D, H, m1) {
+    const style = P(s, 'style', 0);
+    const back = -D / 2;
+    if (style === 0) {
+      // Herdanschlussdose (Unterputz, runder Deckel)
+      b.disc(Math.min(W, H) / 2, D, m1, 0, H / 2, back + D, 36);
+      b.disc(Math.min(W, H) / 2 - 0.008, 0.002, finishMaterial('glanz', shadeOf(s.color, -0.06)), 0, H / 2, back + D + 0.002, 36);
+      for (const dx of [-0.022, 0.022]) b.disc(0.004, 0.002, finishMaterial('metall', '#c7cacd'), dx, H / 2, back + D + 0.003, 10);
+      return;
+    }
+    if (style === 1) {
+      // CEE-Steckdose 16 A (rot)
+      b.box(W, H, D * 0.7, m1, 0, 0, back + D * 0.35, 0.01);
+      const cap = b.cyl(0.032, 0.035, D * 0.5, finishMaterial('glanz', s.color2), 0, 0, 0, 24);
+      cap.rotation.x = Math.PI / 2 - 0.45;
+      cap.position.set(0, H * 0.58, back + D * 0.7 + D * 0.15);
+      b.box(W * 0.6, 0.012, 0.003, finishMaterial('lack', '#2b2d2f'), 0, H * 0.12, back + D * 0.7 + 0.0015);
+      return;
+    }
+    // Wallbox
+    b.box(W, H, D * 0.75, m1, 0, 0, back + D * 0.375, 0.02);
+    b.box(W * 0.7, H * 0.18, 0.004, finishMaterial('glanz', s.color2), 0, H * 0.62, back + D * 0.75 + 0.002, 0.003);
+    b.disc(0.008, 0.003, finishMaterial('lack', '#2fb344'), 0, H * 0.52, back + D * 0.75 + 0.003, 12);
+    const coil = new THREE.Mesh(new THREE.TorusGeometry(Math.min(W, H) * 0.32, 0.009, 8, 32), finishMaterial('lack', '#1f2022'));
+    coil.position.set(0, H * 0.3, back + D * 0.75 + 0.012);
+    b.g.add(coil);
+  },
+
+  data(b, s, W, D, H, m1) {
+    const kind = P(s, 'kind', 0);
+    const plateD = Math.min(D, 0.012);
+    const back = -D / 2;
+    b.box(W, H, plateD, m1, 0, 0, back + plateD / 2, 0.004);
+    const zf = back + plateD;
+    const black = finishMaterial('lack', '#1d1e20');
+    b.box(W * 0.62, H * 0.62, 0.003, finishMaterial('glanz', shadeOf(s.color, -0.04)), 0, H * 0.19, zf + 0.0015, 0.002);
+    if (kind === 0) for (const dx of [-0.012, 0.012]) b.box(0.012, 0.01, 0.002, black, dx, H / 2 - 0.005, zf + 0.0035);
+    else if (kind === 1) {
+      for (const dx of [-0.012, 0.012]) {
+        b.disc(0.0065, 0.004, finishMaterial('metall', '#c9ccce'), dx, H / 2, zf + 0.007, 16);
+        b.disc(0.0015, 0.002, black, dx, H / 2, zf + 0.0075, 8);
+      }
+    } else for (const dx of [-0.012, 0, 0.012]) b.box(0.006, 0.016, 0.002, black, dx, H / 2 - 0.008, zf + 0.0035);
+  },
+
+  lightpoint(b, s, W, D, H, m1) {
+    const bulbMat = finishMaterial('glanz', '#fff6e2');
+    const cord = finishMaterial('lack', '#2a2a2b');
+    if (P(s, 'wall', 0) > 0) {
+      // Wandauslass: Baldachin an der Wand + Fassung mit Leuchtmittel
+      b.disc(Math.min(W, H) * 0.42, 0.02, m1, 0, H / 2, -D / 2 + 0.02, 28);
+      const f = b.cyl(0.016, 0.016, 0.04, cord, 0, 0, 0, 16);
+      f.rotation.x = Math.PI / 2;
+      f.position.set(0, H / 2, -D / 2 + 0.04);
+      const bulb = b.sphere(0.03, bulbMat, 0, H / 2, -D / 2 + 0.085);
+      bulb.userData.lampShade = true;
+      b.g.userData.lightY = H / 2;
+      return;
+    }
+    // Deckenauslass: Baldachin oben, Kabel, Fassung, Glühbirne
+    b.cyl(W / 2, W / 2, 0.025, m1, 0, H - 0.025, 0, 28);
+    b.cyl(0.003, 0.003, Math.max(0.02, H - 0.1), cord, 0, 0.075, 0, 6);
+    b.cyl(0.017, 0.017, 0.04, cord, 0, 0.055, 0, 16);
+    const bulb = b.sphere(0.03, bulbMat, 0, 0.035, 0);
+    bulb.userData.lampShade = true;
+    b.g.userData.lightY = 0.04;
+  },
+
+  smoke(b, _s, W, _D, H, m1) {
+    b.cyl(W / 2, W / 2, H * 0.6, m1, 0, H * 0.4, 0, 32);
+    b.cyl(W / 2 - 0.004, W * 0.32, H * 0.4, m1, 0, 0, 0, 32);
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      b.box(0.012, H * 0.25, 0.002, finishMaterial('lack', '#c8cacb'), Math.cos(a) * W * 0.39, H * 0.08, Math.sin(a) * W * 0.39).rotation.y = -a + Math.PI / 2;
+    }
+    b.sphere(0.003, finishMaterial('glanz', '#e03131'), W * 0.18, 0.001, 0);
+  },
+
+  thermostat(b, _s, W, D, H, m1) {
+    b.box(W, H, D, m1, 0, 0, 0, 0.006);
+    b.box(W * 0.55, H * 0.3, 0.002, finishMaterial('glanz', '#1c2a33'), 0, H * 0.55, D / 2 + 0.001, 0.002);
+    for (const dx of [-0.015, 0, 0.015]) b.disc(0.004, 0.002, finishMaterial('lack', '#b9bcbe'), dx, H * 0.28, D / 2 + 0.002, 12);
+  },
+
+  water(b, s, W, D, H, m1) {
+    const kind = P(s, 'kind', 0);
+    const back = -D / 2;
+    const cold = finishMaterial('glanz', '#1c7ed6');
+    const warm = finishMaterial('glanz', '#e03131');
+    const valve = (x: number, mark: M) => {
+      b.disc(0.022, 0.006, m1, x, H / 2, back + 0.006, 24);
+      const stub = b.cyl(0.007, 0.007, 0.03, m1, 0, 0, 0, 12);
+      stub.rotation.x = Math.PI / 2;
+      stub.position.set(x, H / 2, back + 0.02);
+      b.cyl(0.011, 0.011, Math.min(H, 0.035), m1, x, H / 2 - 0.0175, back + 0.04, 16);
+      b.cyl(0.005, 0.005, 0.03, m1, x, H / 2 - 0.045, back + 0.04, 10);
+      b.disc(0.012, 0.012, m1, x, H / 2, Math.min(D / 2, back + 0.07), 18);
+      b.disc(0.004, 0.002, mark, x, H / 2, Math.min(D / 2, back + 0.07) + 0.002, 10);
+    };
+    if (kind === 0) {
+      valve(-W / 4, warm); // in Deutschland: warm links, kalt rechts
+      valve(W / 4, cold);
+    } else if (kind === 1) valve(0, cold);
+    else if (kind === 2) valve(0, warm);
+    else if (kind === 3) {
+      // Waschmaschine: Geräteventil + Geräteanschluss-Siphon
+      valve(-W / 4, cold);
+      const sw = finishMaterial('glanz', '#f2f2f0');
+      b.box(0.07, Math.min(H, 0.14), 0.06, sw, W / 4, (H - Math.min(H, 0.14)) / 2, back + 0.03, 0.01);
+      const inlet = b.cyl(0.015, 0.015, 0.03, sw, W / 4 + 0.012, 0, 0, 14);
+      inlet.rotation.x = -0.6;
+      inlet.position.set(W / 4 + 0.012, H / 2 + 0.06, back + 0.05);
+      b.disc(0.011, 0.002, finishMaterial('lack', '#2b2c2d'), W / 4 - 0.015, H / 2 - 0.03, back + 0.061, 12);
+    } else if (kind === 4) {
+      // Abflussrohr DN 50
+      b.disc(0.034, 0.006, finishMaterial('lack', '#c9ccce'), 0, H / 2, back + 0.006, 24);
+      b.disc(0.025, D - 0.006, m1, 0, H / 2, D / 2, 24);
+      b.disc(0.02, 0.002, finishMaterial('lack', '#2b2c2d'), 0, H / 2, D / 2 + 0.0005, 20);
+    } else {
+      // Außenwasserhahn
+      b.disc(0.028, 0.008, m1, 0, H / 2, back + 0.008, 24);
+      const body = b.cyl(0.012, 0.012, D * 0.6, m1, 0, 0, 0, 14);
+      body.rotation.x = Math.PI / 2;
+      body.position.set(0, H / 2, back + D * 0.3 + 0.008);
+      b.cyl(0.008, 0.009, H * 0.45, m1, 0, H / 2 - H * 0.45, back + D * 0.55, 12);
+      const handle = b.box(0.05, 0.008, 0.012, finishMaterial('glanz', '#d63c2f'), 0, H / 2 + 0.014, back + D * 0.45, 0.003);
+      handle.rotation.z = 0.2;
+    }
+  },
+
+  distbox(b, s, W, D, H, m1) {
+    const kind = P(s, 'kind', 0);
+    b.box(W, H, D - 0.008, m1, 0, 0, -0.004, 0.006);
+    b.box(W - 0.012, H - 0.012, 0.008, finishMaterial('lack', shadeOf(s.color, 0.03)), 0, 0.006, D / 2 - 0.004, 0.004);
+    b.box(0.012, 0.05, 0.012, finishMaterial('lack', '#8d9194'), W / 2 - 0.04, H / 2 - 0.025, D / 2 + 0.006, 0.003);
+    const slot = finishMaterial('lack', '#a7abae');
+    if (kind === 0) b.box(W * 0.35, 0.03, 0.002, finishMaterial('glanz', '#d9e1e6'), -W * 0.15, H - 0.08, D / 2 + 0.001);
+    else
+      for (const y of [0.04, H - 0.07])
+        for (let i = 0; i < 6; i++) b.box(W * 0.6, 0.004, 0.002, slot, 0, y + i * 0.006, D / 2 + 0.001);
   },
 
   curtain(b, s, W, D, H, m1) {
@@ -808,6 +1066,14 @@ const GENERATORS: Partial<Record<ItemSpec['type'], Gen>> & { box: Gen } = {
     rod.position.set(0, H - 0.02, 0);
   },
 };
+
+/** Farbe aufhellen (f>0) oder abdunkeln (f<0). */
+function shadeOf(hex: string, f: number): string {
+  const c = new THREE.Color(hex);
+  if (f < 0) c.multiplyScalar(1 + f);
+  else c.lerp(new THREE.Color(1, 1, 1), f);
+  return '#' + c.getHexString();
+}
 
 const artCache = new Map<string, THREE.MeshStandardMaterial>();
 function artMaterial(base: string, seed: number): THREE.MeshStandardMaterial {

@@ -194,7 +194,7 @@ input[type='range'] {
 }
 .tabs {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   border-bottom: 1px solid var(--line);
 }
 .tabs button {
@@ -847,4 +847,51 @@ h4 {
   .help-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.toolbar select.techsel {
+  width: auto;
+  padding: 4px 6px;
+}
+.legend-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 10px;
+}
+.legend-grid .lg {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.legend-grid canvas {
+  flex: none;
+}
+table.bom {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+table.bom td {
+  padding: 4px 2px;
+  border-bottom: 1px solid var(--line);
+}
+table.bom td.n {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+table.bom tr.grp td {
+  padding-top: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: none;
+}
+.chips button.preset {
+  font-size: 11.5px;
 }

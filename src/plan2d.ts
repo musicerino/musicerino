@@ -9,20 +9,25 @@ import { settings, stackedOn, moveItemTo, rotateItemTo, snapItemToWall, supportA
 import { ui, onRedraw } from './shared';
 import { siteSun, planDirForBearing } from './sun';
 import { heatColor } from './view3d';
+import { allRuns, defaultRoomBaseboard, faceRange, type Run } from './baseboards';
+import { isTech, SYMBOL_TYPES } from './catalog';
+import { drawSymbol, symbolCenter } from './symbols';
+import { placementAt, techAttachments, reattachTech, type TechAttachment } from './ops';
 import { findPreset } from './textures';
 
-export type Tool = 'select' | 'wall' | 'room' | 'window' | 'door' | 'french' | 'measure';
+export type Tool = 'select' | 'wall' | 'room' | 'window' | 'door' | 'french' | 'measure' | 'place';
 
 type Drag =
   | { kind: 'pan'; sx: number; sy: number; ox: number; oy: number }
   | { kind: 'item'; id: string; off: P; children: Item[]; moved: boolean; start: P }
   | { kind: 'rotate'; id: string; children: Item[] }
-  | { kind: 'node'; at: P; moved: boolean }
-  | { kind: 'wall'; id: string; start: P; a0: P; b0: P; moved: boolean }
+  | { kind: 'node'; at: P; moved: boolean; att: TechAttachment[] }
+  | { kind: 'wall'; id: string; start: P; a0: P; b0: P; moved: boolean; att: TechAttachment[] }
   | { kind: 'opening'; id: string; moved: boolean }
   | { kind: 'room'; start: P; cur: P }
   | { kind: 'measure'; start: P; cur: P }
-  | { kind: 'compass' };
+  | { kind: 'compass' }
+  | { kind: 'baseboard'; id: string; off: number; moved: boolean };
 
 const COL = {
   bg: '#f7f6f3',
@@ -56,6 +61,9 @@ export class Plan2D {
   private pinched = false;
   private tap: { x: number; y: number } | null = null;
   onChainChange: () => void = () => {};
+  /** Katalogeintrag, der beim Werkzeug „place“ per Klick an Wände gesetzt wird */
+  placing: CatalogEntry | null = null;
+  private ghost: Item | null = null;
   private spaceDown = false;
   private dpr = 1;
   private measure: { a: P; b: P } | null = null;
@@ -128,6 +136,8 @@ export class Plan2D {
     this.typed = '';
     this.tool = t;
     this.measure = null;
+    this.ghost = null;
+    if (t !== 'place') this.placing = null;
     this.canvas.style.cursor = t === 'select' ? 'default' : 'crosshair';
     this.onToolChange(t);
     const hints: Record<Tool, string> = {
@@ -138,6 +148,7 @@ export class Plan2D {
       door: 'Tür: Auf eine Wand klicken, um eine Tür einzusetzen.',
       french: 'Balkon-/Terrassentür: Auf eine Wand klicken.',
       measure: 'Messen: Ziehen, um eine Strecke zu messen.',
+      place: `${this.placing?.name ?? 'Element'} setzen: auf eine Wand klicken (mehrfach möglich). Esc oder „Auswahl“ beendet.`,
     };
     const touch = window.matchMedia('(pointer: coarse)').matches;
     const touchHints: Partial<Record<Tool, string>> = {
@@ -146,6 +157,7 @@ export class Plan2D {
       window: 'Fenster: Auf eine Wand tippen.',
       door: 'Tür: Auf eine Wand tippen.',
       french: 'Balkon-/Terrassentür: Auf eine Wand tippen.',
+      place: `${this.placing?.name ?? 'Element'} setzen: auf eine Wand tippen (mehrfach möglich). „Fertig“ beendet.`,
     };
     this.onStatus((touch && touchHints[t]) || hints[t]);
     this.draw();
@@ -220,9 +232,54 @@ export class Plan2D {
 
   // ---------------------------------------------------------------- Treffer
 
+  private techVisible() {
+    return ui.tech !== 'hide';
+  }
+
+  /** Größenfaktor der Plansymbole (wächst leicht mit dem Zoom). */
+  private symbolK() {
+    return clamp(Math.sqrt(this.scale) * 1.15, 1, 1.8) * (this.tf > 1 ? 1.15 : 1);
+  }
+
+  /** Ursprung des Symbols in Weltkoordinaten: Wandoberfläche (bzw. Mitte bei Deckenelementen). */
+  private symbolOrigin(it: Item): P {
+    if (it.ceiling) return { x: it.x, y: it.y };
+    const front = rotCW({ x: 0, y: 1 }, it.rot);
+    return { x: it.x - (front.x * it.d) / 2, y: it.y - (front.y * it.d) / 2 };
+  }
+
+  private symbolHit(it: Item, p: P): boolean {
+    const k = this.symbolK();
+    const c = symbolCenter(it, k);
+    const o = this.symbolOrigin(it);
+    const world = add(o, rotCW({ x: c.x / this.scale, y: c.y / this.scale }, it.rot));
+    return dist(world, p) * this.scale < c.r + 3 * this.tf;
+  }
+
   private hitItem(p: P): Item | null {
-    const items = [...store.project.items].sort((a, b) => b.z + b.h - (a.z + a.h) || a.w * a.d - b.w * b.d);
+    const all = store.project.items;
+    // Plansymbole liegen obenauf
+    if (this.techVisible()) for (const it of all) if (SYMBOL_TYPES.has(it.type) && this.symbolHit(it, p)) return it;
+    const items = all
+      .filter((it) => !SYMBOL_TYPES.has(it.type) && (this.techVisible() || !isTech(it.type)))
+      .sort((a, b) => b.z + b.h - (a.z + a.h) || a.w * a.d - b.w * b.d);
     for (const it of items) if (pointInItem(it, p, (2 * this.tf) / this.scale)) return it;
+    return null;
+  }
+
+  /** Fußleisten-Stück unter dem Punkt? */
+  private hitPiece(p: P): { id: string; s: number } | null {
+    const pr0 = store.project;
+    for (const bp of pr0.baseboards) {
+      const w = pr0.walls.find((x) => x.id === bp.wallId);
+      if (!w) continue;
+      const pr = projectOnSegment(p, w.a, w.b);
+      const n = mul(perp(wallDir(w)), bp.side);
+      const dd = dot(sub(p, pr.q), n);
+      const tol = (4 * this.tf) / this.scale;
+      if (pr.s < bp.start - tol || pr.s > bp.start + bp.length + tol) continue;
+      if (dd >= w.thickness / 2 - tol && dd <= w.thickness / 2 + bp.depth + tol) return { id: bp.id, s: pr.s };
+    }
     return null;
   }
 
@@ -312,9 +369,37 @@ export class Plan2D {
     });
   }
 
+  /** Stempel-Modus: Haustechnik per Klick/Tipp an Wände (bzw. Decke) setzen. */
+  startPlacing(entry: CatalogEntry) {
+    this.placing = entry;
+    this.setTool('place');
+  }
+
+  private placeAt(w: P) {
+    if (!this.placing) return;
+    const it = newItemFromEntry(this.placing, 0, 0, store.project);
+    if (!placementAt(store.project, it, w, (40 * this.tf) / this.scale)) {
+      this.onStatus(it.ceiling ? 'Bitte in einen Raum tippen.' : 'Bitte auf oder direkt neben eine Wand tippen.');
+      return;
+    }
+    store.update((p) => p.items.push(it));
+    store.select({ kind: 'item', id: it.id });
+    this.onStatus(`${it.name} gesetzt (${it.ceiling ? 'an der Decke' : `Höhe Mitte ${Math.round(it.z + it.h / 2)} cm`}). Weitere Stellen antippen – oder „Fertig“.`);
+  }
+
   placeEntry(entry: CatalogEntry, at?: P) {
+    if (isTech(entry.type)) {
+      if (!at) return this.startPlacing(entry);
+      const it = newItemFromEntry(entry, Math.round(at.x), Math.round(at.y), store.project);
+      store.update((p) => {
+        p.items.push(it);
+        placementAt(p, it, at, 120);
+      });
+      store.select({ kind: 'item', id: it.id });
+      return;
+    }
     const pos = at ?? this.toWorld(this.w / 2, this.h / 2);
-    const it = newItemFromEntry(entry, Math.round(pos.x), Math.round(pos.y));
+    const it = newItemFromEntry(entry, Math.round(pos.x), Math.round(pos.y), store.project);
     store.update((p) => {
       p.items.push(it);
       if (settings.snapWalls && it.type !== 'rug') snapItemToWall(p, it);
@@ -374,7 +459,7 @@ export class Plan2D {
 
   /** Werkzeuge, bei denen ein Fingertipp erst beim Loslassen zählt (damit Zwei-Finger-Gesten nichts setzen). */
   private tapTool() {
-    return this.tool === 'wall' || this.tool === 'window' || this.tool === 'door' || this.tool === 'french';
+    return this.tool === 'wall' || this.tool === 'window' || this.tool === 'door' || this.tool === 'french' || this.tool === 'place';
   }
 
   private onDown(e: PointerEvent) {
@@ -571,11 +656,15 @@ export class Plan2D {
       this.insertOpening(hw.w, hw.s, t);
       return;
     }
+    if (t === 'place') {
+      this.placeAt(w);
+      return;
+    }
     // Auswahl-Werkzeug
     const sel = store.selection;
     if (sel?.kind === 'item') {
       const it = store.item(sel.id);
-      if (it && !it.locked && dist(this.rotHandle(it), w) < (10 * this.tf) / this.scale) {
+      if (it && !it.locked && !isTech(it.type) && dist(this.rotHandle(it), w) < (10 * this.tf) / this.scale) {
         this.drag = { kind: 'rotate', id: it.id, children: stackedOn(store.project, it) };
         this.canvas.setPointerCapture(e.pointerId);
         return;
@@ -592,7 +681,15 @@ export class Plan2D {
     }
     const node = this.hitNode(w);
     if (node) {
-      this.drag = { kind: 'node', at: { ...node }, moved: false };
+      this.drag = { kind: 'node', at: { ...node }, moved: false, att: techAttachments(store.project) };
+      this.canvas.setPointerCapture(e.pointerId);
+      return;
+    }
+    const piece = this.hitPiece(w);
+    if (piece) {
+      const bp = store.baseboard(piece.id)!;
+      store.select({ kind: 'baseboard', id: piece.id });
+      this.drag = { kind: 'baseboard', id: piece.id, off: piece.s - bp.start, moved: false };
       this.canvas.setPointerCapture(e.pointerId);
       return;
     }
@@ -606,7 +703,7 @@ export class Plan2D {
     const hw = this.hitWall(w);
     if (hw) {
       store.select({ kind: 'wall', id: hw.w.id });
-      this.drag = { kind: 'wall', id: hw.w.id, start: w, a0: { ...hw.w.a }, b0: { ...hw.w.b }, moved: false };
+      this.drag = { kind: 'wall', id: hw.w.id, start: w, a0: { ...hw.w.a }, b0: { ...hw.w.b }, moved: false, att: techAttachments(store.project) };
       this.canvas.setPointerCapture(e.pointerId);
       return;
     }
@@ -624,7 +721,10 @@ export class Plan2D {
       if (this.tool === 'wall') this.cursor = this.snap(w, this.chain[this.chain.length - 1]);
       else if (this.tool === 'window' || this.tool === 'door' || this.tool === 'french') this.hoverWall = this.hitWall(w, 10);
       else if (this.tool === 'room' || this.tool === 'measure') this.cursor = this.snap(w);
-      else this.updateHoverCursor(w, sx, sy);
+      else if (this.tool === 'place' && this.placing) {
+        const g = newItemFromEntry(this.placing, 0, 0, store.project);
+        this.ghost = placementAt(store.project, g, w, (40 * this.tf) / this.scale) ? g : null;
+      } else this.updateHoverCursor(w, sx, sy);
       this.draw();
       return;
     }
@@ -680,7 +780,10 @@ export class Plan2D {
         const to = this.snapExcluding(w, d.at);
         if (same(to, d.at, 0.01)) return;
         d.moved = true;
-        store.mutate((p) => moveNode(p, d.at, to, 0.5));
+        store.mutate((p) => {
+          moveNode(p, d.at, to, 0.5);
+          reattachTech(p, d.att);
+        });
         d.at = to;
         break;
       }
@@ -700,6 +803,7 @@ export class Plan2D {
           const cb = { ...ww.b };
           moveNode(p, ca, na, 0.5);
           moveNode(p, cb, nb, 0.5);
+          reattachTech(p, d.att);
         });
         this.onStatus(`Wand verschoben um ${fmtLen(off)}`);
         break;
@@ -727,6 +831,21 @@ export class Plan2D {
         d.cur = this.snap(w);
         this.draw();
         break;
+      case 'baseboard': {
+        const bp = store.baseboard(d.id);
+        const wall = bp ? store.wall(bp.wallId) : undefined;
+        if (!bp || !wall) return;
+        const pr = projectOnSegment(w, wall.a, wall.b);
+        let start = pr.s - d.off;
+        if (settings.snapGrid) start = round(start, 1);
+        const face = faceRange(store.project, wall, bp.side);
+        start = clamp(start, face.s0, Math.max(face.s0, face.s1 - bp.length));
+        if (!d.moved && Math.abs(start - bp.start) < 0.5) return;
+        d.moved = true;
+        store.mutate(() => (bp.start = start));
+        this.onStatus(`Fußleiste: ${fmtLen(start - face.s0)} ab Ecke · Länge ${fmtLen(bp.length)} · bis Ecke ${fmtLen(face.s1 - start - bp.length)}`);
+        break;
+      }
     }
   }
 
@@ -761,7 +880,7 @@ export class Plan2D {
     }
     if (!d) return;
     if (d.kind === 'compass') store.commit();
-    if ((d.kind === 'item' || d.kind === 'node' || d.kind === 'wall' || d.kind === 'opening') && d.moved) store.commit();
+    if ((d.kind === 'item' || d.kind === 'node' || d.kind === 'wall' || d.kind === 'opening' || d.kind === 'baseboard') && d.moved) store.commit();
     if (d.kind === 'rotate') store.commit();
     if (d.kind === 'room') {
       const a = d.start;
@@ -813,6 +932,19 @@ export class Plan2D {
           o.wallId = nw.id;
           o.offset -= at;
         }
+      // Fußleisten-Stücke aufteilen bzw. umhängen
+      for (const bp of [...p.baseboards]) {
+        if (bp.wallId !== id) continue;
+        if (bp.start >= at) {
+          bp.wallId = nw.id;
+          bp.start -= at;
+        } else if (bp.start + bp.length > at) {
+          const rest = bp.start + bp.length - at;
+          bp.length = at - bp.start;
+          p.baseboards.push({ ...bp, id: uid(), wallId: nw.id, start: 0, length: rest });
+        }
+      }
+      for (const r of p.rooms) if (r.baseboard?.skip?.includes(id)) r.baseboard.skip.push(nw.id);
       // Raumpolygone um neuen Punkt ergänzen
       for (const r of p.rooms) {
         for (let i = 0; i < r.points.length; i++) {
@@ -862,7 +994,7 @@ export class Plan2D {
     store.update((p) => {
       p.walls.push(...chainWalls(pts, closed, d.wallThickness, d.wallHeight));
       if (closed && pts.length >= 3) {
-        p.rooms.push({ id: uid(), name: `Raum ${p.rooms.length + 1}`, points: pts.map((q) => ({ ...q })), floor: { kind: 'eiche', color: '#ffffff' } });
+        p.rooms.push({ id: uid(), name: `Raum ${p.rooms.length + 1}`, points: pts.map((q) => ({ ...q })), floor: { kind: 'eiche', color: '#ffffff' }, baseboard: defaultRoomBaseboard() });
       }
     });
     this.draw();
@@ -878,7 +1010,7 @@ export class Plan2D {
       );
       p.walls.push(...nw);
       roomId = uid();
-      p.rooms.push({ id: roomId, name: `Raum ${p.rooms.length + 1}`, points: pts.map((q) => ({ ...q })), floor: { kind: 'eiche', color: '#ffffff' } });
+      p.rooms.push({ id: roomId, name: `Raum ${p.rooms.length + 1}`, points: pts.map((q) => ({ ...q })), floor: { kind: 'eiche', color: '#ffffff' }, baseboard: defaultRoomBaseboard() });
     });
     store.select({ kind: 'room', id: roomId });
   }
@@ -899,6 +1031,7 @@ export class Plan2D {
       if (s.kind === 'opening') p.openings = p.openings.filter((o) => o.id !== s.id);
       if (s.kind === 'wall') deleteWall(p, s.id);
       if (s.kind === 'room') p.rooms = p.rooms.filter((r) => r.id !== s.id);
+      if (s.kind === 'baseboard') p.baseboards = p.baseboards.filter((b) => b.id !== s.id);
     });
     store.select(null);
   }
@@ -937,6 +1070,24 @@ export class Plan2D {
       ctx.closePath();
       ctx.fillStyle = this.floorTint(r.floor.kind, r.floor.color);
       ctx.fill();
+      if (r.floorHeating) {
+        // Fußbodenheizung: rote Heizschlangen-Schraffur
+        ctx.save();
+        ctx.clip();
+        const b = bounds(r.points);
+        ctx.strokeStyle = 'rgba(224,49,49,0.28)';
+        ctx.lineWidth = 2 * px;
+        ctx.beginPath();
+        for (let y = b.minY + 10; y < b.maxY; y += 15) {
+          for (let x = b.minX; x <= b.maxX; x += 6) {
+            const yy = y + Math.sin(x / 9) * 2.5;
+            if (x === b.minX) ctx.moveTo(x, yy);
+            else ctx.lineTo(x, yy);
+          }
+        }
+        ctx.stroke();
+        ctx.restore();
+      }
       if (sel) {
         ctx.strokeStyle = COL.accent;
         ctx.lineWidth = 3 * px;
@@ -958,10 +1109,12 @@ export class Plan2D {
       ctx.globalAlpha = 1;
     }
 
-    // Raumbeschriftung (unter den Möbeln)
+    // Raumbeschriftung (unter den Möbeln); weicht Deckenauslässen in der Raummitte aus
+    const ceilingSpots = this.techVisible() ? p.items.filter((it) => it.ceiling) : [];
     for (const r of p.rooms) {
       if (r.points.length < 3) continue;
-      const c = polygonCentroid(r.points);
+      const c = { ...polygonCentroid(r.points) };
+      if (ceilingSpots.some((it) => Math.abs(it.x - c.x) * this.scale < 60 && Math.abs(it.y - c.y) * this.scale < 26)) c.y += 40 / this.scale;
       const area = Math.abs(polygonArea(innerArea(r, p)));
       ctx.save();
       ctx.translate(c.x, c.y);
@@ -976,18 +1129,36 @@ export class Plan2D {
       ctx.fillStyle = 'rgba(43,48,54,0.9)';
       ctx.fillText(r.name, 0, -2);
       ctx.font = '12px Inter, system-ui, sans-serif';
-      ctx.fillText(fmtArea(area), 0, 13);
+      ctx.fillText(fmtArea(area) + (r.floorHeating ? ' · FBH' : ''), 0, 13);
       ctx.restore();
     }
 
+    // Fußleisten (unter den Möbeln, die davor stehen)
+    for (const run of allRuns(p)) this.drawRun(run, px);
 
-    // Möbel
-    const items = [...p.items].sort((a, b) => a.z - b.z || (a.type === 'rug' ? -1 : 0));
-    for (const it of items) this.drawItem(it, px);
+
+    // Möbel (Haustechnik je nach Ebene; Plansymbole folgen später obenauf)
+    const items = [...p.items]
+      .filter((it) => !SYMBOL_TYPES.has(it.type) && (this.techVisible() || !isTech(it.type)))
+      .sort((a, b) => a.z - b.z || (a.type === 'rug' ? -1 : 0));
+    for (const it of items) {
+      ctx.globalAlpha = ui.tech === 'focus' && !isTech(it.type) ? 0.3 : 1;
+      this.drawItem(it, px);
+    }
+    ctx.globalAlpha = 1;
 
     // Wände
     for (const w of p.walls) this.drawWall(w, px);
     for (const o of p.openings) this.drawOpening(o, px);
+
+    // Plansymbole der Haustechnik
+    if (this.techVisible()) for (const it of p.items) if (SYMBOL_TYPES.has(it.type)) this.drawSymbolItem(it, px, false);
+    if (this.tool === 'place' && this.ghost) {
+      ctx.globalAlpha = 0.55;
+      if (SYMBOL_TYPES.has(this.ghost.type)) this.drawSymbolItem(this.ghost, px, false);
+      else this.drawItem(this.ghost, px);
+      ctx.globalAlpha = 1;
+    }
 
     // Maße
     if (ui.showDims) for (const w of p.walls) this.drawWallDim(w, px);
@@ -997,8 +1168,9 @@ export class Plan2D {
     if (s?.kind === 'item') {
       const it = store.item(s.id);
       if (it) {
-        this.drawItemSelection(it, px);
-        if (ui.showItemDims) this.drawClearances(it, px);
+        if (SYMBOL_TYPES.has(it.type)) this.drawSymbolItem(it, px, true);
+        else this.drawItemSelection(it, px);
+        if (ui.showItemDims && !it.ceiling) this.drawClearances(it, px);
       }
     }
     if (s?.kind === 'wall') {
@@ -1021,6 +1193,77 @@ export class Plan2D {
 
     this.drawCompass();
     this.drawScaleBar();
+  }
+
+  /** Fußleiste als schmales Band vor der Wandoberfläche. */
+  private drawRun(run: Run, px: number) {
+    const ctx = this.ctx;
+    const w = run.wall;
+    const dir = wallDir(w);
+    const n = mul(perp(dir), run.side);
+    const sel = store.selection?.kind === 'baseboard' && store.selection.id === run.pieceId;
+    const d = Math.max(run.style.depth, 2 * px);
+    const a = add(add(w.a, mul(dir, run.s0)), mul(n, w.thickness / 2));
+    const b = add(add(w.a, mul(dir, run.s1)), mul(n, w.thickness / 2));
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.lineTo(b.x + n.x * d, b.y + n.y * d);
+    ctx.lineTo(a.x + n.x * d, a.y + n.y * d);
+    ctx.closePath();
+    ctx.fillStyle = shadeHex(run.style.color, -0.12);
+    ctx.fill();
+    ctx.strokeStyle = sel ? COL.accent : 'rgba(40,44,50,0.55)';
+    ctx.lineWidth = (sel ? 2.5 : 0.8) * px;
+    ctx.stroke();
+    if (run.pieceId && this.scale > 1.2) {
+      // Stöße einzelner Stücke markieren
+      ctx.beginPath();
+      for (const q of [a, b]) {
+        ctx.moveTo(q.x, q.y);
+        ctx.lineTo(q.x + n.x * (d + 3 * px), q.y + n.y * (d + 3 * px));
+      }
+      ctx.stroke();
+    }
+  }
+
+  /** Plansymbol eines Technik-Elements; mit Auswahlring und Höhenangabe. */
+  private drawSymbolItem(it: Item, px: number, selected: boolean) {
+    const ctx = this.ctx;
+    const k = this.symbolK();
+    const o = this.symbolOrigin(it);
+    const rot = (it.rot * Math.PI) / 180;
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    ctx.rotate(rot);
+    ctx.scale(px, px);
+    if (selected) {
+      const c = symbolCenter(it, k);
+      ctx.strokeStyle = COL.accent;
+      ctx.fillStyle = 'rgba(47,124,246,0.12)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, c.r + 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    drawSymbol(ctx, it, k, { textRot: -rot });
+    if (selected || ui.tech === 'focus') {
+      const txt = it.ceiling ? 'Decke' : `${Math.round(it.z + it.h / 2)}`;
+      ctx.save();
+      ctx.translate(15 * k, 10 * k);
+      ctx.rotate(-rot);
+      ctx.font = '600 9px Inter, system-ui, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      const tw = ctx.measureText(txt).width;
+      ctx.fillRect(-2, -6, tw + 4, 12);
+      ctx.fillStyle = '#495057';
+      ctx.fillText(txt, 0, 0.5);
+      ctx.restore();
+    }
+    ctx.restore();
   }
 
   private tintCache = new Map<string, string>();
@@ -1302,6 +1545,20 @@ export class Plan2D {
       case 'toilet':
       case 'washbasin':
         ctx.ellipse(0, 4, hw * 0.75, hd * 0.6, 0, 0, Math.PI * 2);
+        break;
+      case 'radiator': {
+        // Heizkörper: Querschraffur
+        const nn = Math.max(3, Math.round(it.w / 8));
+        for (let i = 1; i < nn; i++) {
+          const x = -hw + (it.w * i) / nn;
+          ctx.moveTo(x, -hd);
+          ctx.lineTo(x, hd);
+        }
+        break;
+      }
+      case 'distbox':
+        ctx.moveTo(-hw, hd);
+        ctx.lineTo(hw, -hd);
         break;
     }
     ctx.stroke();
