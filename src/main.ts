@@ -270,6 +270,12 @@ $('btnShot').onclick = () => {
   const mode = views.classList.contains('only2d') ? '2d' : '3d';
   const url = mode === '2d' ? plan.exportPNG() : view.screenshot();
   download(`${store.project.name || 'raumplan'}-${mode}.png`, url);
+  openModal(h('div', {},
+    h('h2', {}, 'Bild der Ansicht'),
+    h('p', { class: 'hint' }, 'Falls kein Download startet: Bild mit Rechtsklick bzw. langem Tippen sichern.'),
+    h('img', { src: url, style: 'width:100%;border-radius:8px;border:1px solid var(--line)' }),
+    h('div', { class: 'btnrow', style: 'justify-content:flex-end' }, h('button', { class: 'primary', onclick: closeModal }, 'Schließen')),
+  ));
 };
 $('btnHelp').onclick = showHelp;
 
