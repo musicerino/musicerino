@@ -8,6 +8,7 @@
 // Alle Positionen entlang einer Wand werden als s (cm ab Wandanfang, auf der Achse) angegeben.
 import type { Baseboard, BaseboardStyle, P, Project, Room, RoomBaseboard, Wall } from './types';
 import { add, cross, dot, mul, norm, perp, polygonArea, sub, wallDir, wallLength } from './geometry';
+import { replacesBaseboard } from './claddings';
 
 export interface Run {
   wall: Wall;
@@ -17,6 +18,7 @@ export interface Run {
   style: BaseboardStyle;
   roomId?: string;
   pieceId?: string;
+  offset?: number; // Abstand zur Wandoberfläche (z.B. vor Holzpaneelen)
 }
 
 export const DEFAULT_BASEBOARD: RoomBaseboard = {
@@ -114,8 +116,37 @@ export function roomWalls(p: Project, r: Room): { wall: Wall; side: 1 | -1; edge
   return out;
 }
 
+/**
+ * Verkleidungen berücksichtigen: Fliesen ab Boden ersetzen die Fußleiste,
+ * vor Paneelen o.ä. sitzt die Leiste um deren Stärke weiter vorn.
+ */
+function applyCladding(p: Project, runs: Run[]): Run[] {
+  const out: Run[] = [];
+  for (const run of runs) {
+    const cl = (p.claddings ?? []).filter((c) => c.wallId === run.wall.id && c.side === run.side && c.bottom < run.style.height && c.top > 0);
+    if (!cl.length) {
+      out.push(run);
+      continue;
+    }
+    const cuts = [run.s0, run.s1];
+    for (const c of cl) for (const v of [c.start, c.start + c.length]) if (v > run.s0 && v < run.s1) cuts.push(v);
+    cuts.sort((a, b) => a - b);
+    for (let i = 0; i < cuts.length - 1; i++) {
+      const a = cuts[i];
+      const b = cuts[i + 1];
+      if (b - a < 0.5) continue;
+      const mid = (a + b) / 2;
+      const cover = cl.filter((c) => c.start <= mid && c.start + c.length >= mid);
+      if (cover.some(replacesBaseboard)) continue;
+      const offset = cover.reduce((m, c) => Math.max(m, c.thickness), 0);
+      out.push({ ...run, s0: a, s1: b, offset: offset || undefined });
+    }
+  }
+  return out;
+}
+
 /** Automatische Fußleiste rundum für einen Raum. */
-export function roomRuns(p: Project, r: Room): Run[] {
+export function roomRuns(p: Project, r: Room, withCladding = true): Run[] {
   const bb = r.baseboard;
   if (!bb || !bb.on) return [];
   const pts = r.points;
@@ -164,13 +195,16 @@ export function roomRuns(p: Project, r: Room): Run[] {
       for (const [a, b] of subtract(s0, s1, doorGaps(p, w))) runs.push({ wall: w, side, s0: a, s1: b, style: styleOf(bb), roomId: r.id });
     }
   });
-  return runs;
+  return withCladding ? applyCladding(p, runs) : runs;
 }
 
 export function pieceRun(p: Project, bp: Baseboard): Run[] {
   const w = p.walls.find((x) => x.id === bp.wallId);
   if (!w) return [];
-  return subtract(bp.start, bp.start + bp.length, doorGaps(p, w)).map(([a, b]) => ({ wall: w, side: bp.side, s0: a, s1: b, style: styleOf(bp), pieceId: bp.id }));
+  return applyCladding(
+    p,
+    subtract(bp.start, bp.start + bp.length, doorGaps(p, w)).map(([a, b]) => ({ wall: w, side: bp.side, s0: a, s1: b, style: styleOf(bp), pieceId: bp.id })),
+  );
 }
 
 export function allRuns(p: Project): Run[] {
@@ -193,7 +227,7 @@ export function faceRange(p: Project, w: Wall, side: 1 | -1): { s0: number; s1: 
   // Bevorzugt aus einem angrenzenden Raum bestimmen (exakte Innenecken)
   for (const r of p.rooms) {
     const tmp: Room = { ...r, baseboard: { ...DEFAULT_BASEBOARD, on: true, depth: 0, skip: [] } };
-    const runs = roomRuns({ ...p, openings: [] }, tmp).filter((x) => x.wall.id === w.id && x.side === side);
+    const runs = roomRuns({ ...p, openings: [] }, tmp, false).filter((x) => x.wall.id === w.id && x.side === side);
     if (runs.length) return { s0: Math.min(...runs.map((x) => x.s0)), s1: Math.max(...runs.map((x) => x.s1)) };
   }
   // sonst: halbe Stärke der anschließenden Wände abziehen
@@ -211,8 +245,9 @@ export function depthAt(p: Project, w: Wall, side: 1 | -1, s: number, halfWidth:
   for (const r of allRuns(p)) {
     if (r.wall.id !== w.id || r.side !== side) continue;
     if (r.s1 < s - halfWidth || r.s0 > s + halfWidth) continue;
-    if (r.style.depth > depth) {
-      depth = r.style.depth;
+    const d = r.style.depth + (r.offset ?? 0);
+    if (d > depth) {
+      depth = d;
       height = r.style.height;
     }
   }

@@ -3,6 +3,7 @@ import type { Item, Opening, Project, P, Wall } from './types';
 import { pointInItem, rotCW, sub, add, projectOnSegment, wallDir, wallLength, perp, mul, dot, clamp } from './geometry';
 import { CATALOG, isTech } from './catalog';
 import { depthAt, faceRange, wallSideRooms } from './baseboards';
+import { claddingDepthAt } from './claddings';
 import { newItemFromEntry } from './items';
 
 export const settings = {
@@ -10,6 +11,8 @@ export const settings = {
   gridStep: 5, // cm
   stack: true,
   snapWalls: true,
+  /** Maße für das Werkzeug „Halbe Wand“ */
+  halfWall: { height: 110, thickness: 11.5 },
 };
 
 const NOT_SUPPORT = new Set(['rug', 'mirror', 'picture', 'curtain', 'pendant', 'plant', 'floorlamp', 'tablelamp', 'radiator']);
@@ -77,11 +80,16 @@ export const wallGap = (type: Item['type']) => (type === 'radiator' ? 4 : 0);
 
 const norm360 = (d: number) => ((Math.round(d * 100) / 100) % 360 + 360) % 360;
 
-/** Zusätzlicher Abstand durch die Fußleiste (Möbel stehen davor, Technik nicht). */
-function baseboardOffset(p: Project, it: Item, w: Wall, side: 1 | -1, s: number): number {
-  if (isTech(it.type) || it.ceiling) return 0;
+/**
+ * Abstand vor der Wandoberfläche: Verkleidungen (Fliesen, Paneele) und – bei Möbeln – Fußleisten.
+ * Haustechnik sitzt auf der Verkleidung, Möbel stehen vor Verkleidung und Fußleiste.
+ */
+function frontOffset(p: Project, it: Item, w: Wall, side: 1 | -1, s: number): number {
+  if (it.ceiling) return 0;
+  const clad = claddingDepthAt(p, w, side, s, it.w / 2, it.z, it.z + it.h);
+  if (isTech(it.type)) return clad;
   const bb = depthAt(p, w, side, s, it.w / 2);
-  return bb.depth > 0 && it.z < bb.height ? bb.depth : 0;
+  return Math.max(clad, bb.depth > 0 && it.z < bb.height ? bb.depth : 0);
 }
 
 /**
@@ -111,20 +119,24 @@ export function snapItemToWall(p: Project, it: Item, threshold = 18): boolean {
   const { w, n, q, side, s } = best;
   // Rückseite (lokal -y) zeigt zur Wand → Vorderseite (lokal +y) = n
   it.rot = norm360((Math.atan2(-n.x, n.y) * 180) / Math.PI);
-  const extra = wallGap(it.type) + baseboardOffset(p, it, w, side, s);
+  const extra = wallGap(it.type) + frontOffset(p, it, w, side, s);
   const c = add(q, mul(n, w.thickness / 2 + extra + it.d / 2));
   it.x = c.x;
   it.y = c.y;
   return true;
 }
 
-/** Setzt ein Element mit der Rückseite an eine Wandseite; s = Mitte entlang der Wand (cm ab Anfang). */
-export function attachToWall(it: Item, w: Wall, side: 1 | -1, s: number) {
+/**
+ * Setzt ein Element mit der Rückseite an eine Wandseite; s = Mitte entlang der Wand (cm ab Anfang).
+ * Mit Projekt `p` sitzt es auf einer eventuellen Verkleidung (Fliesen, Paneele).
+ */
+export function attachToWall(it: Item, w: Wall, side: 1 | -1, s: number, p?: Project) {
   const dir = wallDir(w);
   const n = mul(perp(dir), side);
   const L = wallLength(w);
   const ss = clamp(s, it.w / 2, Math.max(it.w / 2, L - it.w / 2));
-  const c = add(add(w.a, mul(dir, ss)), mul(n, w.thickness / 2 + wallGap(it.type) + it.d / 2));
+  const extra = p ? frontOffset(p, it, w, side, ss) : 0;
+  const c = add(add(w.a, mul(dir, ss)), mul(n, w.thickness / 2 + wallGap(it.type) + extra + it.d / 2));
   it.x = Math.round(c.x * 10) / 10;
   it.y = Math.round(c.y * 10) / 10;
   it.rot = norm360((Math.atan2(-n.x, n.y) * 180) / Math.PI);
@@ -154,7 +166,7 @@ export function wallAttachment(p: Project, it: Item): WallAttachment | null {
     const side: 1 | -1 = dot(sub(back, pr.q), nrm) >= 0 ? 1 : -1;
     const n = mul(nrm, side);
     if (dot(front, n) < 0.7) continue;
-    const err = Math.abs(pr.d - w.thickness / 2 - wallGap(it.type));
+    const err = Math.abs(pr.d - w.thickness / 2 - wallGap(it.type) - frontOffset(p, it, w, side, pr.s));
     if (err > 6 || err >= bestErr) continue;
     bestErr = err;
     const face = faceRange(p, w, side);
@@ -182,7 +194,7 @@ export function setWallDistance(p: Project, it: Item, which: 'left' | 'right', v
   if (!a) return;
   const fromStart = (which === 'left') === a.leftIsStart;
   const s = fromStart ? a.face.s0 + v + it.w / 2 : a.face.s1 - v - it.w / 2;
-  attachToWall(it, a.wall, a.side, s);
+  attachToWall(it, a.wall, a.side, s, p);
 }
 
 /** Wandseite, an der ein Raum liegt (bevorzugt +1). */
@@ -205,7 +217,7 @@ export function radiatorUnderWindow(p: Project, o: Opening): Item | null {
   const width = clamp(Math.round((o.width * 0.85) / 10) * 10, 40, 300);
   const it = newItemFromEntry({ ...base, w: width, h, name: `Heizkörper Typ 22 · ${h} × ${width}` }, 0, 0, p);
   it.z = it.mount = floorGap;
-  attachToWall(it, w, roomSide(p, w), o.offset);
+  attachToWall(it, w, roomSide(p, w), o.offset, p);
   return it;
 }
 
@@ -223,7 +235,7 @@ export function switchNextToDoor(p: Project, o: Opening): Item | null {
     latchHigh ? o.offset - o.width / 2 - 15 - it.w / 2 : o.offset + o.width / 2 + 15 + it.w / 2,
   ];
   const s = candidates.find((c) => c - it.w / 2 >= face.s0 + 3 && c + it.w / 2 <= face.s1 - 3) ?? candidates[0];
-  attachToWall(it, w, side, s);
+  attachToWall(it, w, side, s, p);
   return it;
 }
 
@@ -244,7 +256,7 @@ export function placementAt(p: Project, it: Item, pt: P, tol: number): boolean {
   if (!best) return false;
   // Liegt der Klick fast auf der Wandachse, die Seite mit Raum wählen
   const side = best.d < best.w.thickness / 4 ? roomSide(p, best.w, best.side) : best.side;
-  attachToWall(it, best.w, side, Math.round(best.s));
+  attachToWall(it, best.w, side, Math.round(best.s), p);
   return true;
 }
 
@@ -272,6 +284,6 @@ export function reattachTech(p: Project, list: TechAttachment[]) {
     const w = p.walls.find((x) => x.id === a.wallId);
     if (!it || !w) continue;
     const pr = projectOnSegment({ x: it.x, y: it.y }, w.a, w.b);
-    attachToWall(it, w, a.side, pr.s);
+    attachToWall(it, w, a.side, pr.s, p);
   }
 }

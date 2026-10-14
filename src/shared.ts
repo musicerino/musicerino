@@ -5,8 +5,23 @@ export interface HeatData {
   label: string;
 }
 
+import type { P } from './types';
+
+/** Farbige Analyse-Ebene über dem Boden (z.B. Lichtzonen), 1 Pixel = 1 Rasterzelle. */
+export interface Overlay {
+  canvas: HTMLCanvasElement;
+  x0: number; // Weltkoordinate (cm) der Mitte der ersten Zelle
+  y0: number;
+  step: number; // Zellgröße in cm
+  clip: P[][]; // Raumpolygone
+  alpha: number;
+  markers?: { x: number; y: number; label: string; color: string }[];
+  info?: (p: P) => string | null;
+}
+
 export const ui = {
   heat: null as HeatData | null,
+  overlay: null as Overlay | null,
   showDims: true,
   showItemDims: true,
   /** Haustechnik im Plan: anzeigen, hervorheben (Möbel blass) oder ausblenden */

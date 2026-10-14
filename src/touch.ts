@@ -139,7 +139,7 @@ export function initWallBar(plan: Plan2D) {
   );
   let last = '';
   plan.onChainChange = () => {
-    const show = plan.tool === 'wall';
+    const show = plan.chainTool();
     if (bar.hidden === show) bar.hidden = !show;
     if (!show) return;
     const n = plan.chainCount;
@@ -200,6 +200,10 @@ export function initSelectionBar(plan: Plan2D) {
         propsBtn,
         del,
       );
+    } else if (s.kind === 'cladding') {
+      const c = store.cladding(s.id);
+      if (!c) return;
+      put(bar, h('span', { class: 'lbl' }, `Verkleidung ${Math.round(c.bottom)}–${Math.round(c.top)} cm`), propsBtn, del);
     } else if (s.kind === 'baseboard') {
       const bp = store.baseboard(s.id);
       if (!bp) return;

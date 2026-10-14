@@ -1,9 +1,9 @@
-// Linke Seitenleiste: Raum, Möbel, Oberflächen, Licht & Sonne.
+// Linke Seitenleiste: Raum, Möbel, Technik, Material, Licht.
 import { store, chainWalls, innerArea, demoProject, emptyProject } from './store';
 import { h, put, numField, textField, selectField, openModal, closeModal } from './dom';
 import { CATALOG, CATEGORIES, TECH_CATEGORIES } from './catalog';
 import { baseboardEditor } from './techui';
-import { defaultRoomBaseboard } from './baseboards';
+import { defaultRoomBaseboard, wallSideRooms } from './baseboards';
 import type { CatalogEntry, P, SurfaceMat } from './types';
 import { thumbnail } from './thumbs';
 import { FLOOR_MATERIALS, WALL_MATERIALS, presetPreview, findPreset, type MatPreset } from './textures';
@@ -11,8 +11,8 @@ import { uid, bounds, polygonArea, fmtArea, fmtLen } from './geometry';
 import { sunTimes, siteSun, fmtTime, compassName, timeZones } from './sun';
 import type { Plan2D } from './plan2d';
 import type { View3D } from './view3d';
-import { ui, requestRedraw } from './shared';
 import { openCustomFurniture } from './custom';
+import { renderLightCards } from './plantui';
 
 export interface Ctx {
   plan: Plan2D;
@@ -362,6 +362,21 @@ export function renderMaterialTab(el: HTMLElement) {
         ),
       );
     } else el.append(h('p', { class: 'hint' }, 'Lege zuerst einen Raum an, um Böden zu gestalten.'));
+    el.append(
+      h('div', { class: 'card' },
+        h('h3', {}, 'Wandverkleidungen'),
+        h('p', { class: 'hint' }, 'Teile einer Wand fliesen, mit Holz- oder Akustikpaneelen verkleiden, Backstein freilegen oder zweifarbig streichen: Wand anklicken → rechts unter „Wandverkleidung“ eine Vorlage wählen, z.B. Küchenrückwand (90–150 cm) oder Bad halbhoch. Höhe, Breite, Lage und Material sind frei einstellbar.'),
+        p.claddings.length
+          ? h('div', { class: 'list' }, ...p.claddings.map((c) => {
+              const w = p.walls.find((x) => x.id === c.wallId);
+              const room = w ? wallSideRooms(p, w)[c.side] : undefined;
+              return h('div', { class: 'li', onclick: () => store.select({ kind: 'cladding', id: c.id }) },
+                h('span', {}, `${findPreset(c.material.kind).label}${room ? ` · ${room.name}` : ''}`),
+                h('span', { class: 'muted' }, `${Math.round(c.bottom)}–${Math.round(c.top)} cm`));
+            }))
+          : h('p', { class: 'hint' }, 'Noch keine Verkleidungen.'),
+      ),
+    );
     const ceil = h('input', { type: 'color', value: p.ceilingColor }) as HTMLInputElement;
     ceil.addEventListener('change', () => store.update((pp) => (pp.ceilingColor = ceil.value)));
     el.append(h('div', { class: 'card' }, h('h3', {}, 'Decke'), h('div', { class: 'row' }, h('label', {}, 'Farbe'), ceil), h('p', { class: 'hint' }, 'Sichtbar im Rundgang-Modus (3D → „Rundgang“).')));
@@ -376,6 +391,7 @@ export function renderMaterialTab(el: HTMLElement) {
       p.walls.map((w) => [w.a, w.b, w.thickness]),
       p.openings.map((o) => [o.offset, o.width, o.sill]),
       p.baseboards.length,
+      p.claddings.map((c) => [c.id, c.material.kind, c.bottom, c.top, c.wallId, c.side]),
       p.ceilingColor,
       store.selection?.kind === 'room' ? store.selection.id : '',
     ]);
@@ -404,7 +420,6 @@ const CITIES: [string, number, number, string][] = [
 
 export function renderSunTab(el: HTMLElement, ctx: Ctx) {
   const info = h('div', { class: 'card' });
-  const heatCard = h('div', { class: 'card' });
   const loc = h('div', { class: 'card' });
   const renderLoc = () => {
     const s = store.project.site;
@@ -435,6 +450,10 @@ export function renderSunTab(el: HTMLElement, ctx: Ctx) {
       h('h4', {}, 'Ausrichtung'),
       h('p', { class: 'hint' }, 'In welche Richtung zeigt Norden im Grundriss? 0° = nach oben, 90° = nach rechts. Du kannst auch die Kompassnadel oben rechts im 2D-Plan drehen.'),
       northControl(s.north),
+      h('h4', {}, 'Umgebung'),
+      h('p', { class: 'hint' }, 'Verschatten Nachbarhäuser oder Bäume die Sonne? Höhe des Horizonts in Grad (0° = freie Sicht, 20° ≈ gegenüberliegendes Haus in Straßenbreite).'),
+      h('div', { class: 'chips' }, ...[0, 10, 20, 30].map((v) => h('button', { class: (s.horizon ?? 0) === v ? 'active' : '', onclick: () => store.update((p) => (p.site.horizon = v)) }, v === 0 ? 'frei' : `${v}°`)),
+        numField('', s.horizon ?? 0, (v) => store.update((p) => (p.site.horizon = Math.max(0, Math.min(60, v)))), { unit: '°', digits: 0 })),
     );
   };
   const renderInfo = () => {
@@ -464,47 +483,19 @@ export function renderSunTab(el: HTMLElement, ctx: Ctx) {
       h('p', { class: 'hint' }, 'Datum und Uhrzeit stellst du unter der 3D-Ansicht ein. ▶ spielt den Tagesverlauf ab; die Schatten fallen durch die Fenster in den Raum.'),
     );
   };
-  const renderHeat = (progress?: number) => {
-    heatCard.innerHTML = '';
-    const bar = h('div', { class: 'progress' }, h('div', { style: `width:${Math.round((progress ?? 0) * 100)}%` }));
-    put(heatCard,
-      h('h3', {}, 'Sonnenstunden-Karte'),
-      h('p', { class: 'hint' }, 'Berechnet für jeden Punkt am Boden, wie lange am gewählten Tag direktes Sonnenlicht durch die Fenster fällt – inklusive Abschattung durch Wände und Möbel.'),
-      h('div', { class: 'btnrow fill' },
-        h('button', { class: 'primary', disabled: progress !== undefined, onclick: async () => {
-          ctx.plan.draw();
-          renderHeat(0);
-          const res = await ctx.view.computeSunHours(20, 15, (f) => {
-            const d = heatCard.querySelector('.progress > div') as HTMLElement | null;
-            if (d) d.style.width = Math.round(f * 100) + '%';
-          });
-          ui.heat = { ...res, label: store.project.site.date };
-          ctx.view.showHeatmap(ui.heat);
-          requestRedraw();
-          renderHeat();
-          const max = Math.max(0, ...res.cells.map((c) => c.hours));
-          ctx.status(res.cells.length ? `Sonnenstunden berechnet (${store.project.site.date}): bis zu ${max.toFixed(1).replace('.', ',')} h direkte Sonne.` : 'Keine Räume vorhanden – bitte zuerst einen Raum anlegen.');
-        } }, progress !== undefined ? 'Berechne …' : 'Für diesen Tag berechnen'),
-        ui.heat ? h('button', { onclick: () => { ui.heat = null; ctx.view.showHeatmap(null); requestRedraw(); renderHeat(); } }, 'Ausblenden') : null,
-      ),
-      progress !== undefined ? bar : null,
-      ui.heat ? h('div', {}, h('div', { class: 'legend' }), h('div', { class: 'legend-labels' }, h('span', {}, '0 h'), h('span', {}, `${Math.max(0, ...ui.heat.cells.map((c) => c.hours)).toFixed(1).replace('.', ',')} h`)), h('p', { class: 'hint' }, `Stand: ${ui.heat.label}. Nach Änderungen neu berechnen.`)) : null,
-    );
-  };
   renderLoc();
   renderInfo();
-  renderHeat();
   let k1 = '';
   store.on(() => {
     const s = store.project.site;
-    const k = JSON.stringify([s.lat, s.lon, s.tz, s.north]);
+    const k = JSON.stringify([s.lat, s.lon, s.tz, s.north, s.horizon]);
     if (k !== k1 && !loc.contains(document.activeElement)) {
       k1 = k;
       renderLoc();
     }
     renderInfo();
   });
-  el.append(loc, info, heatCard);
+  el.append(loc, info, ...renderLightCards(ctx));
 }
 
 function northControl(north: number): HTMLElement {

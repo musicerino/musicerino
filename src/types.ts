@@ -12,6 +12,8 @@ export interface SurfaceMat {
   color: string; // Tönung (#rrggbb)
 }
 
+export type WallKind = 'solid' | 'glass';
+
 export interface Wall {
   id: ID;
   a: P;
@@ -19,9 +21,23 @@ export interface Wall {
   thickness: number;
   height: number;
   material?: SurfaceMat | null; // null/undefined = Standard-Wandmaterial des Projekts
+  kind?: WallKind; // Massivwand (Standard) oder Glaswand
 }
 
-export type OpeningType = 'window' | 'door' | 'french';
+/** Verkleidung auf einem Teil einer Wandseite (Fliesen, Paneele, Backstein, Farbfläche …). */
+export interface Cladding {
+  id: ID;
+  wallId: ID;
+  side: 1 | -1;
+  start: number; // cm ab Wandanfang (Achse)
+  length: number; // cm
+  bottom: number; // Unterkante über Fußboden (cm)
+  top: number; // Oberkante über Fußboden (cm)
+  material: SurfaceMat;
+  thickness: number; // cm, z.B. Fliese + Kleber ≈ 1, Paneele ≈ 2
+}
+
+export type OpeningType = 'window' | 'door' | 'french' | 'passage';
 
 export interface Opening {
   id: ID;
@@ -34,6 +50,7 @@ export interface Opening {
   hingeRight?: boolean; // Tür: Anschlag rechts
   swingOut?: boolean; // Tür: öffnet zur anderen Wandseite
   frameColor?: string;
+  overhang?: number; // Balkon / Vordach über der Öffnung (Tiefe in cm, außen)
 }
 
 export type Finish = 'lack' | 'holz' | 'stoff' | 'metall' | 'glanz';
@@ -155,6 +172,7 @@ export interface Site {
   tz: string; // IANA-Zeitzone
   date: string; // YYYY-MM-DD
   minutes: number; // Uhrzeit (lokal) in Minuten seit Mitternacht
+  horizon?: number; // Verschattung durch Nachbarbebauung/Bäume: Horizonthöhe in Grad
 }
 
 export interface CatalogEntry extends ItemSpec {
@@ -175,6 +193,7 @@ export interface Project {
   rooms: Room[];
   items: Item[];
   baseboards: Baseboard[];
+  claddings: Cladding[];
   wallMat: SurfaceMat;
   ceilingColor: string;
   defaults: { wallHeight: number; wallThickness: number };
@@ -188,4 +207,5 @@ export type Selection =
   | { kind: 'item'; id: ID }
   | { kind: 'room'; id: ID }
   | { kind: 'baseboard'; id: ID }
+  | { kind: 'cladding'; id: ID }
   | null;

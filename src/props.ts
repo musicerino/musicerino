@@ -2,14 +2,15 @@
 import { store, moveNode, innerArea } from './store';
 import { h, numField, textField, selectField, colorField, checkbox, paramField } from './dom';
 import { TYPE_INFO, FINISHES, COLORS, HEIGHT_PRESETS, isTech, trade } from './catalog';
-import type { Item, Wall, Opening, Room, Finish, OpeningType, Project, Baseboard } from './types';
+import type { Item, Wall, Opening, Room, Finish, OpeningType, Project, Baseboard, Cladding, WallKind } from './types';
 import { wallLength, wallDir, add, mul, perp, dot, fmtArea, fmtLen, polygonArea, uid, clamp } from './geometry';
 import { stackedOn, rotateItemTo, moveItemTo, snapItemToWall, supportAt, wallAttachment, setWallDistance, radiatorUnderWindow, switchNextToDoor, techAttachments, reattachTech } from './ops';
 import { faceRange, wallSideRooms } from './baseboards';
 import { ceilingHeight } from './items';
 import { baseboardEditor, baseboardStyleFields, addPiece, splitPiece, TECH_COLORS } from './techui';
 import { materialPicker, TINT_COLORS, type Ctx } from './panels';
-import { WALL_MATERIALS, FLOOR_MATERIALS } from './textures';
+import { WALL_MATERIALS, FLOOR_MATERIALS, findPreset } from './textures';
+import { CLADDING_PRESETS, CLADDING_MATERIALS, makeCladding, applyPreset } from './claddings';
 import { openCustomFurniture } from './custom';
 
 const PALETTE = Object.values(COLORS).slice(0, 14);
@@ -45,6 +46,9 @@ export function initProps(el: HTMLElement, ctx: Ctx) {
     } else if (s.kind === 'baseboard') {
       const bp = store.baseboard(s.id);
       if (bp) el.append(...baseboardProps(bp, ctx));
+    } else if (s.kind === 'cladding') {
+      const c = store.cladding(s.id);
+      if (c) el.append(...claddingProps(c, ctx));
     }
   };
   let raf = 0;
@@ -85,8 +89,8 @@ function overview(): HTMLElement[] {
       h('li', {}, 'Links unter „Raum“ einen Raum aus Maßen anlegen oder Wände ziehen.'),
       h('li', {}, 'Fenster & Türen setzen (Werkzeugleiste über dem Plan), dann Maße hier anpassen.'),
       h('li', {}, 'Unter „Möbel“ Katalogteile anklicken oder in den Plan/3D ziehen.'),
-      h('li', {}, 'Unter „Oberflächen“ Wand- und Bodenmaterial wählen.'),
-      h('li', {}, 'Unter „Licht & Sonne“ Koordinaten & Nordrichtung eingeben, dann unten die Uhrzeit bewegen.'),
+      h('li', {}, 'Unter „Material“ Wand- und Bodenmaterial wählen; Fliesen oder Paneele auf Teilflächen: Wand anklicken → „+ Küchenrückwand“ usw.'),
+      h('li', {}, 'Unter „Licht“ Koordinaten & Nordrichtung eingeben, Lichtzonen berechnen und Pflanzen suchen.'),
     ),
     h('h4', {}, 'Tastenkürzel'),
     h('div', { class: 'hint' },
@@ -95,7 +99,7 @@ function overview(): HTMLElement[] {
       shortcut('R / Shift+R', 'Drehen 90° / 15°'),
       shortcut('Pfeiltasten', 'Verschieben 1 cm (Shift: 10 cm)'),
       shortcut('Strg+Z / Strg+Y', 'Rückgängig / Wiederholen'),
-      shortcut('V W F T M', 'Auswahl · Wand · Fenster · Tür · Messen'),
+      shortcut('V W H F T D M', 'Auswahl · Wand · Halbe Wand · Fenster · Tür · Durchgang · Messen'),
       shortcut('Esc', 'Werkzeug beenden'),
     ),
   ];
@@ -219,9 +223,22 @@ function wallProps(w: Wall, ctx: Ctx): HTMLElement[] {
   const ang = ((Math.atan2(-(w.b.y - w.a.y), w.b.x - w.a.x) * 180) / Math.PI + 360) % 360;
   const own = !!w.material;
   const mat = w.material ?? store.project.wallMat;
+  const roomH = Math.max(store.project.defaults.wallHeight, ...store.project.walls.filter((x) => x.height >= 200).map((x) => x.height));
+  const heightPresets: [string, number][] = [
+    ['Raumhoch', roomH],
+    ['Brüstung 100', 100],
+    ['Theke 110', 110],
+    ['Halbhoch 120', 120],
+    ['Raumteiler 150', 150],
+  ];
   return [
-    h('h3', {}, 'Wand'),
+    h('h3', {}, w.kind === 'glass' ? 'Glaswand' : w.height < roomH - 1 ? 'Halbe Wand' : 'Wand'),
     h('p', { class: 'hint', style: 'margin-top:-6px' }, `Länge ${fmtLen(L)} (Achsmaß) · Endpunkte im Plan ziehbar`),
+    selectField('Wandart', w.kind ?? 'solid', [
+      { value: 'solid', label: 'Massivwand' },
+      { value: 'glass', label: 'Glaswand (Loft, Stahlrahmen)' },
+    ], (v) => set((x) => (x.kind = v as WallKind))),
+    h('div', { style: 'height:6px' }),
     h('div', { class: 'grid2' },
       numField('Länge', L, (v) => set((x, p) => {
         const nb = add(x.a, mul(wallDir(x), v));
@@ -235,16 +252,116 @@ function wallProps(w: Wall, ctx: Ctx): HTMLElement[] {
       numField('Stärke', w.thickness, (v) => set((x) => (x.thickness = v)), { unit: 'cm', min: 1, max: 100, length: true }),
       numField('Höhe', w.height, (v) => set((x) => (x.height = v)), { unit: 'cm', min: 10, max: 1000, length: true }),
     ),
+    h('div', { class: 'chips' }, ...heightPresets.map(([label, v]) => h('button', { class: 'preset' + (Math.abs(w.height - v) < 0.5 ? ' active' : ''), onclick: () => set((x) => (x.height = v)) }, label))),
     h('div', { class: 'btnrow' },
       h('button', { onclick: () => ctx.plan.splitWall(w.id) }, 'In der Mitte teilen'),
       h('button', { onclick: () => addOpening(w, 'window') }, '+ Fenster'),
       h('button', { onclick: () => addOpening(w, 'door') }, '+ Tür'),
+      h('button', { onclick: () => addOpening(w, 'passage') }, '+ Durchgang'),
       h('button', { class: 'danger', onclick: () => ctx.plan.deleteSelection() }, 'Löschen'),
     ),
     h('h4', {}, 'Oberfläche dieser Wand'),
     checkbox('Eigenes Material statt Standard', own, (v) => set((x, p) => (x.material = v ? { ...p.wallMat } : null))),
     own ? materialPicker(WALL_MATERIALS, mat, (m) => set((x) => (x.material = m))) : h('p', { class: 'hint' }, 'Verwendet das Standard-Wandmaterial (Tab „Material“).'),
+    wallCladdings(w),
     wallBaseboards(w),
+  ];
+}
+
+/** Verkleidungen einer Wand (je Wandseite): Liste und Vorlagen zum Hinzufügen. */
+function wallCladdings(w: Wall): HTMLElement {
+  const p = store.project;
+  const rooms = wallSideRooms(p, w);
+  const box = h('div', {}, h('h4', {}, 'Wandverkleidung (Fliesen, Paneele …)'));
+  if (w.kind === 'glass') {
+    box.append(h('p', { class: 'hint' }, 'Glaswände lassen sich nicht verkleiden.'));
+    return box;
+  }
+  for (const side of [1, -1] as const) {
+    const room = rooms[side];
+    const list = p.claddings.filter((c) => c.wallId === w.id && c.side === side);
+    if (!room && !list.length && (rooms[1] || rooms[-1])) continue;
+    const label = room ? room.name : side === 1 ? 'Seite A' : 'Seite B';
+    const card = h('div', { class: 'card' }, h('div', { style: 'font-weight:600;margin-bottom:6px' }, `Seite „${label}“`));
+    if (list.length)
+      card.append(h('div', { class: 'list', style: 'margin-bottom:6px' }, ...list.map((c) =>
+        h('div', { class: 'li', onclick: () => store.select({ kind: 'cladding', id: c.id }) },
+          h('span', {}, findPreset(c.material.kind).label),
+          h('span', { class: 'muted' }, `${Math.round(c.bottom)}–${Math.round(c.top)} cm · ${fmtLen(c.length)}`)))));
+    card.append(
+      h('div', { class: 'muted', style: 'font-size:11.5px;margin-bottom:4px' }, 'Hinzufügen:'),
+      h('div', { class: 'chips', style: 'margin:0' }, ...CLADDING_PRESETS.map((pr) => h('button', { class: 'preset', title: pr.desc, onclick: () => {
+        const c = makeCladding(store.project, w, side, pr.id);
+        store.update((pp) => {
+          const att = techAttachments(pp);
+          pp.claddings.push(c);
+          reattachTech(pp, att);
+        });
+        store.select({ kind: 'cladding', id: c.id });
+      } }, '+ ' + pr.label))),
+    );
+    box.append(card);
+  }
+  return box;
+}
+
+// ---------------------------------------------------------------- Wandverkleidung
+
+function claddingProps(c: Cladding, ctx: Ctx): HTMLElement[] {
+  // Steckdosen & Co. sitzen auf der Verkleidung und wandern bei Änderungen mit
+  const set = (fn: (x: Cladding, p: Project) => void) =>
+    upd((p) => p.claddings, c.id, (x, p) => {
+      const att = techAttachments(p);
+      fn(x, p);
+      reattachTech(p, att);
+    });
+  const p = store.project;
+  const w = p.walls.find((x) => x.id === c.wallId);
+  if (!w) return [];
+  const face = faceRange(p, w, c.side);
+  const rooms = wallSideRooms(p, w);
+  const n = mul(perp(wallDir(w)), c.side);
+  const endIsRight = dot(wallDir(w), { x: n.y, y: -n.x }) > 0;
+  const distStart = c.start - face.s0;
+  const distEnd = face.s1 - c.start - c.length;
+  const setLeft = (v: number) => set((x) => (x.start = endIsRight ? face.s0 + v : face.s1 - v - x.length));
+  const setRight = (v: number) => set((x) => (x.start = endIsRight ? face.s1 - v - x.length : face.s0 + v));
+  const sideLabel = (sd: 1 | -1) => rooms[sd]?.name ?? (sd === 1 ? 'Seite A (ohne Raum)' : 'Seite B (ohne Raum)');
+  return [
+    h('h3', {}, 'Wandverkleidung'),
+    h('p', { class: 'hint', style: 'margin-top:-6px' }, `${findPreset(c.material.kind).label} · Wand mit ${fmtLen(face.s1 - face.s0)} Innenlänge · Fenster und Türen werden ausgespart`),
+    selectField('Wandseite', String(c.side), [
+      { value: '1', label: sideLabel(1) },
+      { value: '-1', label: sideLabel(-1) },
+    ], (v) => set((x) => (x.side = parseInt(v, 10) === -1 ? -1 : 1))),
+    h('h4', {}, 'Vorlagen'),
+    h('div', { class: 'chips' }, ...CLADDING_PRESETS.map((pr) => h('button', { class: 'preset', title: pr.desc, onclick: () => set((x) => applyPreset(x, w, pr.id)) }, pr.label))),
+    h('h4', {}, 'Fläche'),
+    h('div', { class: 'grid3' },
+      numField('Abstand links', endIsRight ? distStart : distEnd, setLeft, { unit: 'cm', min: 0, length: true }),
+      numField('Breite', c.length, (v) => set((x) => (x.length = v)), { unit: 'cm', min: 5, length: true }),
+      numField('Abstand rechts', endIsRight ? distEnd : distStart, setRight, { unit: 'cm', min: 0, length: true }),
+    ),
+    h('div', { class: 'grid3' },
+      numField('von Höhe', c.bottom, (v) => set((x) => (x.bottom = Math.min(v, x.top - 1))), { unit: 'cm', min: 0, length: true }),
+      numField('bis Höhe', c.top, (v) => set((x) => (x.top = Math.max(v, x.bottom + 1))), { unit: 'cm', min: 1, length: true }),
+      numField('Stärke', c.thickness, (v) => set((x) => (x.thickness = v)), { unit: 'cm', min: 0.1, max: 10, length: true }),
+    ),
+    h('div', { class: 'btnrow' },
+      h('button', { onclick: () => set((x) => {
+        x.start = face.s0;
+        x.length = face.s1 - face.s0;
+      }) }, 'Ganze Wandbreite'),
+      h('button', { onclick: () => set((x) => (x.bottom = 0)) }, 'Ab Boden'),
+      h('button', { onclick: () => set((x, pp) => (x.top = pp.walls.find((ww) => ww.id === x.wallId)?.height ?? x.top)) }, 'Bis zur Decke'),
+    ),
+    h('h4', {}, 'Material'),
+    materialPicker(CLADDING_MATERIALS, c.material, (m) => set((x) => (x.material = m))),
+    h('p', { class: 'hint' }, 'Fliesen ab dem Boden ersetzen dort die Fußleiste. Vor Paneelen sitzt die Fußleiste entsprechend weiter vorn. Möbel und Steckdosen rücken automatisch vor die Verkleidung.'),
+    h('div', { class: 'btnrow' },
+      h('button', { onclick: () => store.select({ kind: 'wall', id: w.id }) }, 'Zur Wand'),
+      h('button', { class: 'danger', onclick: () => ctx.plan.deleteSelection() }, 'Löschen'),
+    ),
   ];
 }
 
@@ -280,7 +397,7 @@ function wallBaseboards(w: Wall): HTMLElement {
 
 function addOpening(w: Wall, type: OpeningType) {
   const L = wallLength(w);
-  const def = type === 'window' ? { width: 100, height: 135, sill: 90 } : { width: 90, height: 205, sill: 0 };
+  const def = type === 'window' ? { width: 100, height: 135, sill: 90 } : type === 'passage' ? { width: 100, height: 210, sill: 0 } : { width: 90, height: 205, sill: 0 };
   const width = Math.min(def.width, L - 10);
   const o: Opening = { id: uid(), wallId: w.id, type, offset: L / 2, ...def, width };
   store.update((p) => p.openings.push(o));
@@ -293,16 +410,23 @@ function openingProps(o: Opening, ctx: Ctx): HTMLElement[] {
   const set = (fn: (x: Opening, p: Project) => void) => upd((p) => p.openings, o.id, fn);
   const w = store.wall(o.wallId);
   const L = w ? wallLength(w) : 0;
-  const names: Record<OpeningType, string> = { window: 'Fenster', door: 'Tür', french: 'Balkon-/Terrassentür' };
+  const names: Record<OpeningType, string> = { window: 'Fenster', door: 'Tür', french: 'Balkon-/Terrassentür', passage: 'Durchgang / Durchreiche' };
   const left = o.offset - o.width / 2;
   const right = L - o.offset - o.width / 2;
   return [
     h('h3', {}, names[o.type]),
     selectField('Art', o.type, (Object.keys(names) as OpeningType[]).map((k) => ({ value: k, label: names[k] })), (v) => set((x) => {
       x.type = v as OpeningType;
-      if (v !== 'window') x.sill = 0;
+      if (v === 'door' || v === 'french') x.sill = 0;
       if (v === 'window' && x.sill === 0) x.sill = 90;
     })),
+    o.type === 'passage'
+      ? h('div', { class: 'chips' },
+          h('button', { class: 'preset', onclick: () => set((x) => Object.assign(x, { sill: 0, height: 210 })) }, 'Durchgang ohne Tür'),
+          h('button', { class: 'preset', onclick: () => set((x) => Object.assign(x, { sill: 95, height: 60 })) }, 'Durchreiche (Küche)'),
+          h('button', { class: 'preset', onclick: () => set((x) => Object.assign(x, { sill: 0, height: Math.max(210, (w?.height ?? 250) - 1) })) }, 'Raumhoher Durchbruch'),
+        )
+      : null,
     h('h4', {}, 'Maße'),
     h('div', { class: 'grid2' },
       numField('Breite', o.width, (v) => set((x) => {
@@ -320,7 +444,17 @@ function openingProps(o: Opening, ctx: Ctx): HTMLElement[] {
     ),
     h('p', { class: 'hint' }, 'Gemessen ab Wandanfang/-ende (Achse). Im Plan kannst du die Öffnung entlang der Wand ziehen – auch auf eine andere Wand.'),
     h('div', { class: 'btnrow' }, h('button', { onclick: () => set((x) => (x.offset = L / 2)) }, 'Mittig setzen')),
-    o.type !== 'window'
+    o.type === 'window' || o.type === 'french'
+      ? h('div', {},
+          h('h4', {}, 'Balkon / Vordach darüber'),
+          h('p', { class: 'hint', style: 'margin-top:0' }, 'Ein Balkon oder Dachüberstand über dem Fenster hält die hohe Sommersonne ab – wirkt in 3D und in der Lichtanalyse.'),
+          h('div', { class: 'row' },
+            numField('Tiefe außen', o.overhang ?? 0, (v) => set((x) => (x.overhang = Math.max(0, v))), { unit: 'cm', min: 0, max: 400, length: true }),
+            h('div', { class: 'chips', style: 'margin:16px 0 0' }, ...[0, 80, 150].map((v) => h('button', { class: 'preset', onclick: () => set((x) => (x.overhang = v)) }, v ? `${v} cm` : 'keiner'))),
+          ),
+        )
+      : null,
+    o.type === 'door' || o.type === 'french'
       ? h('div', {}, h('h4', {}, 'Öffnungsrichtung'),
           h('div', { class: 'btnrow' },
             h('button', { onclick: () => set((x) => (x.hingeRight = !x.hingeRight)) }, `Anschlag ${o.hingeRight ? 'rechts' : 'links'} ⇄`),
@@ -328,7 +462,7 @@ function openingProps(o: Opening, ctx: Ctx): HTMLElement[] {
           ))
       : null,
     h('h4', {}, 'Haustechnik'),
-    o.type === 'window'
+    o.type === 'window' || o.type === 'french'
       ? h('div', { class: 'btnrow' }, h('button', { onclick: () => {
           const r = radiatorUnderWindow(store.project, o);
           if (!r) return ctx.status('Unter diesem Fenster ist zu wenig Platz für einen Heizkörper (Brüstung zu niedrig).');

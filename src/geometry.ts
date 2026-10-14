@@ -84,7 +84,8 @@ export function pointInPolygon(p: P, pts: P[]): boolean {
 }
 
 /** Verschiebt ein geschlossenes Polygon um `d` nach innen (Gehrung an den Ecken). */
-export function insetPolygon(pts: P[], d: number): P[] {
+/** Polygon nach innen versetzen – um d, oder je Kante i (pts[i] → pts[i+1]) um d[i]. */
+export function insetPolygon(pts: P[], d: number | number[]): P[] {
   const n = pts.length;
   if (n < 3) return pts.slice();
   const sign = polygonArea(pts) > 0 ? 1 : -1; // y nach unten: positiv = im Uhrzeigersinn am Bildschirm
@@ -93,7 +94,7 @@ export function insetPolygon(pts: P[], d: number): P[] {
     const dir = norm(sub(q, p));
     // Innen-Normale
     const nrm = mul(perp(dir), sign);
-    return { p: add(p, mul(nrm, d)), dir };
+    return { p: add(p, mul(nrm, typeof d === 'number' ? d : d[i] ?? 0)), dir };
   });
   const out: P[] = [];
   for (let i = 0; i < n; i++) {

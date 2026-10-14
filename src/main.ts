@@ -71,16 +71,20 @@ const ICONS: Record<string, string> = {
   door: '<path d="M4 15V4M4 4a11 11 0 0 1 11 11" fill="none" stroke="currentColor" stroke-width="1.8"/>',
   french: '<path d="M3 15V5M16 15V5M3 5a6.5 6.5 0 0 1 6.5 6.5M16 5a6.5 6.5 0 0 0-6.5 6.5" fill="none" stroke="currentColor" stroke-width="1.6"/>',
   measure: '<path d="M2 13l11-11 4 4-11 11z M6 9l1.5 1.5M8.5 6.5l1.5 1.5M11 4l1.5 1.5" fill="none" stroke="currentColor" stroke-width="1.5"/>',
+  halfwall: '<path d="M3 15V9h10" fill="none" stroke="currentColor" stroke-width="3"/><path d="M3 6h13" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2 2"/>',
+  passage: '<path d="M3 16V4M16 16V4" stroke="currentColor" stroke-width="2.6"/><path d="M6 10h7" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2 2"/>',
   fit: '<path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4" fill="none" stroke="currentColor" stroke-width="2"/>',
 };
 const icon = (k: string) => `<svg viewBox="0 0 19 19">${ICONS[k]}</svg>`;
 const toolDefs: [Tool, string, string][] = [
   ['select', 'Auswahl', 'V'],
   ['wall', 'Wand', 'W'],
+  ['halfwall', 'Halbe Wand', 'H'],
   ['room', 'Raum', ''],
   ['window', 'Fenster', 'F'],
   ['door', 'Tür', 'T'],
   ['french', 'Balkontür', ''],
+  ['passage', 'Durchgang', 'D'],
   ['measure', 'Messen', 'M'],
 ];
 const tb2 = $('toolbar2d');
@@ -314,19 +318,19 @@ function showHelp() {
       h('div', { class: 'help-grid' },
         h('div', {},
           h('h4', {}, '1 · Räume'),
-          h('p', {}, '„Raum aus Maßen“ (links) erzeugt einen Raum mit exakten Innenmaßen. Mit dem Wand-Werkzeug (W) klickst du Punkt für Punkt – tippe dabei eine Länge (z.B. 3,45m) und drücke Enter. Endpunkte und ganze Wände lassen sich ziehen; Doppelklick auf eine Wand teilt sie.'),
-          h('h4', {}, '2 · Fenster & Türen'),
-          h('p', {}, 'Werkzeug wählen und auf eine Wand klicken. Rechts Breite, Höhe, Brüstung und Abstände eingeben. Im Plan entlang der Wand ziehbar.'),
+          h('p', {}, '„Raum aus Maßen“ (links) erzeugt einen Raum mit exakten Innenmaßen. Mit dem Wand-Werkzeug (W) klickst du Punkt für Punkt – tippe dabei eine Länge (z.B. 3,45m) und drücke Enter. Endpunkte und ganze Wände lassen sich ziehen; Doppelklick auf eine Wand teilt sie. „Halbe Wand“ (H) zieht Tresen, Brüstungen und Raumteiler (110 cm hoch); jede Wand lässt sich rechts auf eine andere Höhe oder als Glaswand umstellen.'),
+          h('h4', {}, '2 · Fenster, Türen & Durchgänge'),
+          h('p', {}, 'Werkzeug wählen und auf eine Wand klicken. Rechts Breite, Höhe, Brüstung und Abstände eingeben. Im Plan entlang der Wand ziehbar. „Durchgang“ (D) setzt eine Öffnung ohne Tür – mit Brüstung als Durchreiche. Über Fenstern und Balkontüren kann ein Balkon oder Vordach (Überstand) eingetragen werden; er beschattet in der Lichtberechnung.'),
           h('h4', {}, '3 · Möbel'),
           h('p', {}, 'Im Katalog anklicken (Einfügen in der Plan-Mitte) oder per Drag & Drop in 2D/3D ablegen. Möbel docken an Wände an; auf ein anderes Möbel gezogen, werden sie gestapelt. Drehen über den runden Griff, R-Taste oder rechts. „Möbel nach Maß“ baut beliebige Stücke als 3D-Modell.'),
         ),
         h('div', {},
-          h('h4', {}, '4 · Oberflächen & Fußleisten'),
-          h('p', {}, 'Material & Farbe für alle Wände, einzelne Wände und jeden Boden. Fußleisten je Raum rundum (Höhe, Tiefe, Profil, Farbe; Türen werden ausgespart, Wände abwählbar) oder als Einzelstücke mit eigener Länge – Wand anklicken → „+ Fußleisten-Stück“.'),
+          h('h4', {}, '4 · Material, Verkleidungen & Fußleisten'),
+          h('p', {}, 'Material & Farbe für alle Wände, einzelne Wände und jeden Boden. Teilflächen verkleiden: Wand anklicken → „+ Küchenrückwand“, „+ Bad halbhoch“, „+ Holzpaneele“ … – Breite, Abstände und Höhe von/bis frei einstellbar, der Rest der Wand bleibt unverkleidet. Fenster werden ausgespart, Steckdosen wandern mit. Fußleisten je Raum rundum (Höhe, Tiefe, Profil, Farbe; Türen werden ausgespart, Wände abwählbar) oder als Einzelstücke mit eigener Länge – Wand anklicken → „+ Fußleisten-Stück“.'),
           h('h4', {}, 'Haustechnik'),
           h('p', {}, 'Tab „Technik“: Steckdosen, Schalter, Starkstrom, Netzwerk, Lichtauslässe, Rauchmelder, Wasseranschlüsse und Heizkörper antippen und dann auf Wände tippen. Höhen nach DIN 18015-3, rechts änderbar. „Technik: Elektroplan“ in der Werkzeugleiste zeigt einen Installationsplan mit Höhen.'),
-          h('h4', {}, '5 · Licht & Sonne'),
-          h('p', {}, 'Koordinaten des Hauses eingeben (z.B. aus Google Maps: Rechtsklick → Koordinaten kopieren) und Norden ausrichten – per Kompass im Plan oder Regler. Unter der 3D-Ansicht Datum und Uhrzeit wählen oder ▶ für den Tagesverlauf. Die Sonnenstunden-Karte zeigt, wo wie lange Sonne hinfällt.'),
+          h('h4', {}, '5 · Licht, Sonne & Pflanzen'),
+          h('p', {}, 'Koordinaten des Hauses eingeben (z.B. aus Google Maps: Rechtsklick → Koordinaten kopieren) und Norden ausrichten – per Kompass im Plan oder Regler. Unter der 3D-Ansicht Datum und Uhrzeit wählen oder ▶ für den Tagesverlauf. „Lichtzonen berechnen“ zeigt sonnige, halbschattige, helle, schattige und dunkle Plätze (Jahresmittel oder Sommer/Winter) mit Pflanzenempfehlungen. In der Pflanzensuche einen Namen eingeben – die App nennt die Lichtansprüche und markiert die besten Plätze im Plan.'),
           h('h4', {}, 'iPad & Touch'),
           h('p', {}, 'Ein Finger verschiebt Möbel und Wände, zwei Finger zoomen und verschieben den Plan. In 3D Möbel erst antippen, dann ziehen. Beim Wand-Werkzeug erscheint unten eine Leiste: Länge eingeben und Richtungspfeil antippen. Die Knöpfe ◧ und ◨ oben öffnen die Seitenleisten. Als App installieren: „App installieren“ oben bzw. Safari → Teilen → „Zum Home-Bildschirm“.'),
           h('h4', {}, 'Speichern'),
@@ -397,7 +401,7 @@ window.addEventListener('keydown', (e) => {
     store.select(null);
     return;
   }
-  const map: Record<string, Tool> = { v: 'select', w: 'wall', f: 'window', t: 'door', m: 'measure' };
+  const map: Record<string, Tool> = { v: 'select', w: 'wall', h: 'halfwall', f: 'window', t: 'door', d: 'passage', m: 'measure' };
   const t = map[e.key.toLowerCase()];
   if (t) plan.setTool(t);
 });

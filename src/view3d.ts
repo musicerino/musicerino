@@ -5,11 +5,13 @@ import { store, newItemFromEntry } from './store';
 import type { Item, Opening, Project, Wall, P } from './types';
 import { buildModel, disposeGroup } from './models';
 import { surfaceMaterial, setMaxAnisotropy, finishMaterial } from './textures';
-import { wallLength, same, bounds, pointInPolygon, projectOnSegment, perp, wallDir, sub, add, mul, cross } from './geometry';
+import { wallLength, same, bounds, pointInPolygon, perp, wallDir, sub, add, mul, cross } from './geometry';
+import type { Overlay } from './shared';
 import { siteSun, planDirForBearing } from './sun';
 import { stackedOn, moveItemTo, settings, supportAt, snapItemToWall, placementAt } from './ops';
 import type { CatalogEntry, BaseboardProfile } from './types';
 import { allRuns, type Run } from './baseboards';
+import { claddingRects } from './claddings';
 import { isTech } from './catalog';
 
 const S = 0.01; // cm → m
@@ -216,7 +218,7 @@ export class View3D {
     // Extrusionsrichtung auf die Wandrichtung drehen, Profil zur jeweiligen Wandseite
     geo.rotateY(run.side === 1 ? -Math.PI / 2 : Math.PI / 2);
     const mesh = new THREE.Mesh(geo, finishMaterial(run.style.finish, run.style.color));
-    mesh.position.set((run.side === 1 ? run.s1 : run.s0) * S, 0, (run.side * t) / 2);
+    mesh.position.set((run.side === 1 ? run.s1 : run.s0) * S, 0, run.side * (t / 2 + (run.offset ?? 0) * S));
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.userData.baseboard = run.pieceId ?? run.roomId;
@@ -244,6 +246,13 @@ export class View3D {
       if (L < 0.01) return;
       const t = w.thickness * S;
       const H = w.height * S + idx * 0.0002;
+      // Innen/Außen bestimmen
+      const mid = mul(add(w.a, w.b), 0.5);
+      const n = perp(wallDir(w));
+      const off = w.thickness / 2 + 8;
+      const inA = p.rooms.some((r) => pointInPolygon(add(mid, mul(n, off)), r.points));
+      const inB = p.rooms.some((r) => pointInPolygon(add(mid, mul(n, -off)), r.points));
+      const outside: 1 | -1 = inA && !inB ? -1 : !inA && inB ? 1 : -1;
       const connA = p.walls.some((o) => o !== w && (same(o.a, w.a) || same(o.b, w.a)));
       const connB = p.walls.some((o) => o !== w && (same(o.a, w.b) || same(o.b, w.b)));
       const e0 = connA ? t / 2 : 0;
@@ -271,27 +280,45 @@ export class View3D {
         hole.closePath();
         shape.holes.push(hole);
       }
-      const geo = new THREE.ExtrudeGeometry(shape, { depth: t, bevelEnabled: false, steps: 1 });
-      const mat = w.material ? surfaceMaterial(w.material.kind, w.material.color) : surfaceMaterial(p.wallMat.kind, p.wallMat.color);
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.z = -t / 2;
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      mesh.userData.wallId = w.id;
       const g = new THREE.Group();
-      g.add(mesh);
-      for (const o of ops) g.add(this.buildOpening(o, t, w.height * S));
+      if (w.kind === 'glass') {
+        g.add(this.buildGlassWall(L, H, t, ops));
+      } else {
+        const geo = new THREE.ExtrudeGeometry(shape, { depth: t, bevelEnabled: false, steps: 1 });
+        const mat = w.material ? surfaceMaterial(w.material.kind, w.material.color) : surfaceMaterial(p.wallMat.kind, p.wallMat.color);
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.z = -t / 2;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        mesh.userData.wallId = w.id;
+        g.add(mesh);
+        // Verkleidungen (Fliesen, Paneele …) auf Teilflächen
+        for (const c of p.claddings) {
+          if (c.wallId !== w.id) continue;
+          const th = Math.max(0.001, c.thickness * S);
+          const cm = surfaceMaterial(c.material.kind, c.material.color);
+          for (const r of claddingRects(p, c)) {
+            const sh = new THREE.Shape();
+            sh.moveTo(r.s0 * S, r.z0 * S);
+            sh.lineTo(r.s1 * S, r.z0 * S);
+            sh.lineTo(r.s1 * S, Math.min(r.z1 * S, H));
+            sh.lineTo(r.s0 * S, Math.min(r.z1 * S, H));
+            sh.closePath();
+            const cmesh = new THREE.Mesh(new THREE.ExtrudeGeometry(sh, { depth: th, bevelEnabled: false }), cm);
+            cmesh.position.z = c.side === 1 ? t / 2 : -t / 2 - th;
+            cmesh.castShadow = true;
+            cmesh.receiveShadow = true;
+            cmesh.userData.cladding = c.id;
+            g.add(cmesh);
+          }
+        }
+      }
+      for (const o of ops) g.add(this.buildOpening(o, t, w.height * S, outside));
       for (const run of runsByWall.get(w.id) ?? []) g.add(this.baseboardMesh(run, t));
       const ang = Math.atan2(w.b.y - w.a.y, w.b.x - w.a.x);
       g.position.set(w.a.x * S, 0, w.a.y * S);
       g.rotation.y = -ang;
       this.wallGroup.add(g);
-      // Innen/Außen bestimmen
-      const mid = mul(add(w.a, w.b), 0.5);
-      const n = perp(wallDir(w));
-      const off = w.thickness / 2 + 8;
-      const inA = p.rooms.some((r) => pointInPolygon(add(mid, mul(n, off)), r.points));
-      const inB = p.rooms.some((r) => pointInPolygon(add(mid, mul(n, -off)), r.points));
       this.wallMeshes.push({ group: g, wall: w, ext: inA !== inB, inside: inA ? 1 : inB ? -1 : 0 });
     });
     // Decke (wirft Schatten, im Orbit-Modus unsichtbar)
@@ -310,8 +337,66 @@ export class View3D {
     }
   }
 
-  private buildOpening(o: Opening, t: number, wallH: number): THREE.Group {
+  /** Glastrennwand im Loft-Stil: schwarze Stahlprofile, Glasfelder (lassen Licht durch). */
+  private buildGlassWall(L: number, H: number, t: number, ops: Opening[]): THREE.Group {
     const g = new THREE.Group();
+    const steel = finishMaterial('metall', '#1f2022');
+    const glass = new THREE.MeshPhysicalMaterial({ color: 0xe8f4f6, roughness: 0.03, transparent: true, opacity: 0.16, depthWrite: false });
+    const fd = Math.min(0.05, t);
+    const pw = 0.04;
+    const box = (x0: number, x1: number, y0: number, y1: number, m: THREE.Material, d = fd) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(Math.max(0.002, x1 - x0), Math.max(0.002, y1 - y0), d), m);
+      mesh.position.set((x0 + x1) / 2, (y0 + y1) / 2, 0);
+      mesh.castShadow = !m.transparent;
+      mesh.receiveShadow = true;
+      g.add(mesh);
+    };
+    // Abschnitte zwischen Türen/Durchgängen
+    const gaps = ops.map((o) => [(o.offset - o.width / 2) * S, (o.offset + o.width / 2) * S] as [number, number]).sort((a, b) => a[0] - b[0]);
+    const segs: [number, number][] = [];
+    let cur = 0;
+    for (const [a, b] of gaps) {
+      if (a > cur) segs.push([cur, a]);
+      cur = Math.max(cur, b);
+    }
+    if (cur < L) segs.push([cur, L]);
+    box(0, L, H - pw, H, steel);
+    for (const [a, b] of segs) {
+      box(a, b, 0, pw, steel);
+      box(a, b, 0.9, 0.9 + pw * 0.75, steel);
+      const n = Math.max(1, Math.round((b - a) / 0.9));
+      const step = (b - a) / n;
+      for (let i = 0; i <= n; i++) {
+        const x = a + i * step;
+        box(Math.max(a, x - pw / 2), Math.min(b, x + pw / 2), 0, H, steel);
+      }
+      box(a, b, pw, H - pw, glass, 0.008);
+    }
+    return g;
+  }
+
+  private buildOpening(o: Opening, t: number, wallH: number, outside: 1 | -1 = -1): THREE.Group {
+    const g = new THREE.Group();
+    if (o.overhang && o.overhang > 0) {
+      // Balkon / Vordach darüber (außen, auf Deckenhöhe)
+      const od = o.overhang * S;
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(o.width * S + 0.6, 0.18, od), finishMaterial('lack', '#b9b7b2'));
+      slab.position.set(o.offset * S, wallH + 0.09, outside * (t / 2 + od / 2));
+      slab.castShadow = true;
+      slab.receiveShadow = true;
+      g.add(slab);
+    }
+    if (o.type === 'passage') {
+      // Durchgang ohne Tür; mit Brüstung als Durchreiche mit Ablage
+      if (o.sill > 5) {
+        const board = new THREE.Mesh(new THREE.BoxGeometry(o.width * S + 0.04, 0.03, t + 0.06), finishMaterial('holz', '#c9a374'));
+        board.position.set(o.offset * S, o.sill * S - 0.015, 0);
+        board.castShadow = true;
+        board.receiveShadow = true;
+        g.add(board);
+      }
+      return g;
+    }
     const w = o.width * S;
     const h = Math.min(o.height * S, wallH - 0.02);
     const x = o.offset * S;
@@ -472,7 +557,9 @@ export class View3D {
 
     const day = THREE.MathUtils.smoothstep(alt, -4, 8);
     const warm = 1 - THREE.MathUtils.smoothstep(alt, 2, 30);
-    this.sun.intensity = 4.2 * THREE.MathUtils.smoothstep(alt, -0.5, 10);
+    // Nachbarbebauung/Bäume: unter der Horizonthöhe keine direkte Sonne
+    const behindHorizon = alt < (site.horizon ?? 0);
+    this.sun.intensity = behindHorizon ? 0 : 4.2 * THREE.MathUtils.smoothstep(alt, -0.5, 10);
     this.sun.color.setRGB(1, 0.94 - warm * 0.28, 0.86 - warm * 0.5);
     this.sun.visible = alt > -0.5;
     this.hemi.intensity = 0.08 + 0.42 * day;
@@ -875,88 +962,25 @@ export class View3D {
     this.invalidate();
   }
 
-  // ------------------------------------------------------------------ Sonnenstunden
+  // ------------------------------------------------------------------ Analyse-Ebene
 
-  /** Berechnet, wie viele Stunden direkte Sonne auf jeden Bodenpunkt fallen. */
-  async computeSunHours(stepCm = 20, stepMin = 15, onProgress?: (f: number) => void): Promise<{ cells: { x: number; y: number; hours: number }[]; step: number }> {
-    const p = store.project;
-    const polys = p.rooms.length ? p.rooms.map((r) => r.points) : [];
-    if (!polys.length) return { cells: [], step: stepCm };
-    const occluders: THREE.Object3D[] = [];
-    this.wallGroup.traverse((o) => {
-      const m = o as THREE.Mesh;
-      if (m.isMesh && m.castShadow) occluders.push(m);
-    });
-    this.itemGroup.traverse((o) => {
-      const m = o as THREE.Mesh;
-      if (m.isMesh && m.castShadow) occluders.push(m);
-    });
-    this.ceilGroup.traverse((o) => {
-      const m = o as THREE.Mesh;
-      if (m.isMesh) occluders.push(m);
-    });
-    this.scene.updateMatrixWorld(true);
-    const times: THREE.Vector3[] = [];
-    for (let m = 0; m < 1440; m += stepMin) {
-      const sp = siteSun(p.site, m + stepMin / 2);
-      if (sp.altitude <= 0.5) continue;
-      const d2 = planDirForBearing(p.site.north, sp.bearing);
-      const a = (sp.altitude * Math.PI) / 180;
-      times.push(new THREE.Vector3(d2.x * Math.cos(a), Math.sin(a), d2.y * Math.cos(a)).normalize());
-    }
-    const cells: { x: number; y: number; hours: number }[] = [];
-    const ray = new THREE.Raycaster();
-    ray.far = 200;
-    const pts: P[] = [];
-    for (const poly of polys) {
-      const b = bounds(poly);
-      for (let x = b.minX + stepCm / 2; x < b.maxX; x += stepCm)
-        for (let y = b.minY + stepCm / 2; y < b.maxY; y += stepCm) {
-          const q = { x, y };
-          if (!pointInPolygon(q, poly)) continue;
-          // Punkte innerhalb von Wänden auslassen
-          if (p.walls.some((w) => projectOnSegment(q, w.a, w.b).d < w.thickness / 2 + 1)) continue;
-          if (!pts.some((o) => Math.abs(o.x - x) < 0.1 && Math.abs(o.y - y) < 0.1)) pts.push(q);
-        }
-    }
-    const origin = new THREE.Vector3();
-    for (let i = 0; i < pts.length; i++) {
-      const q = pts[i];
-      origin.set(q.x * S, 0.02, q.y * S);
-      let lit = 0;
-      for (const dir of times) {
-        ray.set(origin, dir);
-        if (ray.intersectObjects(occluders, false).length === 0) lit++;
-      }
-      cells.push({ x: q.x, y: q.y, hours: (lit * stepMin) / 60 });
-      if (i % 40 === 0) {
-        onProgress?.(i / pts.length);
-        await new Promise((r) => setTimeout(r, 0));
-      }
-    }
-    onProgress?.(1);
-    return { cells, step: stepCm };
-  }
-
-  showHeatmap(data: { cells: { x: number; y: number; hours: number }[]; step: number } | null) {
+  /** Zeigt eine Analyse (z.B. Lichtzonen) als weiche, farbige Fläche knapp über dem Boden. */
+  showOverlay(ov: Overlay | null) {
     this.clearGroup(this.heatGroup);
-    if (!data || !data.cells.length) {
-      this.invalidate();
-      return;
+    if (ov) {
+      const tex = new THREE.CanvasTexture(ov.canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.magFilter = THREE.LinearFilter;
+      tex.minFilter = THREE.LinearFilter;
+      const w = ov.canvas.width * ov.step * S;
+      const d = ov.canvas.height * ov.step * S;
+      const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: ov.alpha, depthWrite: false });
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat);
+      plane.rotation.x = -Math.PI / 2;
+      plane.position.set((ov.x0 - ov.step / 2) * S + w / 2, 0.012, (ov.y0 - ov.step / 2) * S + d / 2);
+      plane.renderOrder = 2;
+      this.heatGroup.add(plane);
     }
-    const max = Math.max(1, ...data.cells.map((c) => c.hours));
-    const geo = new THREE.PlaneGeometry(data.step * S, data.step * S);
-    geo.rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.6, depthWrite: false, vertexColors: false });
-    const inst = new THREE.InstancedMesh(geo, mat, data.cells.length);
-    const m4 = new THREE.Matrix4();
-    const col = new THREE.Color();
-    data.cells.forEach((c, i) => {
-      m4.makeTranslation(c.x * S, 0.01, c.y * S);
-      inst.setMatrixAt(i, m4);
-      inst.setColorAt(i, heatColor(c.hours / max, col));
-    });
-    this.heatGroup.add(inst);
     this.invalidate();
   }
 }

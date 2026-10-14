@@ -366,6 +366,17 @@ export const WALL_MATERIALS: MatPreset[] = [
       ctx.fillRect(i * w, 0, 2, S);
     }
   } },
+  { id: 'akustik', label: 'Akustikpaneele (Holzlamellen)', size: 0.6, color: '#ffffff', roughness: 0.75, bump: 0.005, draw: (ctx, S, r) => {
+    ctx.fillStyle = 'rgb(36,36,38)';
+    ctx.fillRect(0, 0, S, S);
+    const n = 12;
+    const w = S / n;
+    for (let i = 0; i < n; i++) {
+      ctx.fillStyle = shade([194, 158, 116], 0.86 + r() * 0.22);
+      ctx.fillRect(i * w + w * 0.17, 0, w * 0.66, S);
+      grain(ctx, i * w + w * 0.17, 0, w * 0.66, S, r, false, 0.14);
+    }
+  } },
   { id: 'metro', label: 'Metro-Fliesen 10×20', size: 0.6, color: '#ffffff', roughness: 0.15, bump: 0.003, draw: tiles([245, 245, 243], 3, 6, 'rgb(190,190,186)', 0.04, true, 3) },
   { id: 'wandfliesen', label: 'Wandfliesen 30×60', size: 1.2, color: '#ece9e4', roughness: 0.25, bump: 0.003, draw: tiles([238, 238, 238], 2, 4, 'rgb(180,180,176)', 0.03, false, 3) },
   { id: 'tapete_streifen', label: 'Tapete Streifen', size: 1.0, color: '#ffffff', roughness: 0.85, draw: stripes('rgb(222,227,226)', 'rgb(240,240,236)', 10) },
@@ -403,6 +414,35 @@ export function hash(s: string): number {
     h = Math.imul(h, 16777619);
   }
   return h >>> 0;
+}
+
+const avgCache = new Map<string, [number, number, number]>();
+/** Mittlere Farbe eines Materials (für den 2D-Plan), mit Tönung multipliziert. */
+export function presetAverage(id: string, tint = '#ffffff'): string {
+  let avg = avgCache.get(id);
+  if (!avg) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 16;
+    const ctx = c.getContext('2d')!;
+    ctx.drawImage(presetCanvas(findPreset(id)), 0, 0, 16, 16);
+    const d = ctx.getImageData(0, 0, 16, 16).data;
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      r += d[i];
+      g += d[i + 1];
+      b += d[i + 2];
+    }
+    const n = d.length / 4;
+    avg = [r / n, g / n, b / n];
+    avgCache.set(id, avg);
+  }
+  const t = parseInt(tint.replace('#', ''), 16);
+  const tr = (t >> 16) & 255;
+  const tg = (t >> 8) & 255;
+  const tb = t & 255;
+  return `rgb(${Math.round((avg[0] * tr) / 255)},${Math.round((avg[1] * tg) / 255)},${Math.round((avg[2] * tb) / 255)})`;
 }
 
 /** Vorschau-Daten-URL einer Material-Textur (für die Oberfläche). */

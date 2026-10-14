@@ -4,6 +4,7 @@ import { CATALOG } from './catalog';
 import { newItemFromEntry } from './items';
 import { defaultRoomBaseboard } from './baseboards';
 import { attachToWall, radiatorUnderWindow } from './ops';
+import { makeCladding } from './claddings';
 
 const STORAGE_KEY = 'raumplaner.project.v1';
 
@@ -18,6 +19,7 @@ export function emptyProject(): Project {
     rooms: [],
     items: [],
     baseboards: [],
+    claddings: [],
     wallMat: { kind: 'farbe', color: '#f4f1ec' },
     ceilingColor: '#ffffff',
     defaults: { wallHeight: 250, wallThickness: 15 },
@@ -53,6 +55,7 @@ export function demoProject(): Project {
   p.name = 'Beispiel-Wohnung';
   const t = 15;
   const h = 260;
+  p.defaults.wallHeight = h; // neue Wände passen zur Raumhöhe der Beispielwohnung
   // Wohnraum 520 × 420 (innen) + Schlafzimmer 360 × 420 rechts daneben
   const A = { x: 0, y: 0 };
   const pts = [
@@ -103,9 +106,11 @@ export function demoProject(): Project {
   put('ingolf', 175, 290, 180);
   put('ingolf', 105, 370);
   put('ingolf', 175, 370);
-  put('malm160', 720, 112);
-  put('malmNacht', 606, 32);
-  put('malmNacht', 834, 32);
+  // Akzentwand hinter dem Bett: Akustikpaneele (Holzlamellen); Bett und Nachttische stehen davor
+  p.claddings.push(makeCladding(p, top2, 1, 'akustik'));
+  put('malm160', 720, 114.5);
+  put('malmNacht', 606, 34.5);
+  put('malmNacht', 834, 34.5);
   put('pax200', 873, 330, 90);
   put('lohals', 720, 260, 90);
 
@@ -115,7 +120,7 @@ export function demoProject(): Project {
     if (!e) return;
     const it = newItemFromEntry(e, 0, 0, p);
     if (center !== undefined) it.z = it.mount = Math.max(0, center - it.h / 2);
-    attachToWall(it, wall, side, s);
+    attachToWall(it, wall, side, s, p);
     p.items.push(it);
   };
   const atCeiling = (id: string, x: number, y: number) => {
@@ -254,7 +259,8 @@ class Store {
       (s.kind === 'opening' && p.openings.some((o) => o.id === s.id)) ||
       (s.kind === 'item' && p.items.some((o) => o.id === s.id)) ||
       (s.kind === 'room' && p.rooms.some((o) => o.id === s.id)) ||
-      (s.kind === 'baseboard' && p.baseboards.some((o) => o.id === s.id));
+      (s.kind === 'baseboard' && p.baseboards.some((o) => o.id === s.id)) ||
+      (s.kind === 'cladding' && p.claddings.some((o) => o.id === s.id));
     if (!exists) this.select(null);
     else for (const l of this.selListeners) l();
   }
@@ -286,6 +292,9 @@ class Store {
   baseboard(id: string) {
     return this.project.baseboards.find((w) => w.id === id);
   }
+  cladding(id: string) {
+    return this.project.claddings.find((w) => w.id === id);
+  }
 
   catalog(): CatalogEntry[] {
     return this.project.customCatalog;
@@ -301,6 +310,7 @@ function migrate(p: Project): Project {
   out.items = (out.items || []).map((it) => ({ ...it, params: it.params || {} }));
   out.customCatalog = out.customCatalog || [];
   out.baseboards = out.baseboards || [];
+  out.claddings = out.claddings || [];
   return out;
 }
 
@@ -321,14 +331,34 @@ export function deleteWall(p: Project, id: string) {
   p.walls = p.walls.filter((w) => w.id !== id);
   p.openings = p.openings.filter((o) => o.wallId !== id);
   p.baseboards = p.baseboards.filter((b) => b.wallId !== id);
+  p.claddings = p.claddings.filter((c) => c.wallId !== id);
   for (const r of p.rooms) if (r.baseboard?.skip) r.baseboard.skip = r.baseboard.skip.filter((x) => x !== id);
 }
 
 export function innerArea(r: Room, p: Project): P[] {
-  // Raumfläche = Polygon auf Wandachsen, um halbe (mittlere) Wandstärke nach innen versetzt
-  const ts = p.walls.map((w) => w.thickness);
-  const t = ts.length ? ts.reduce((a, b) => a + b, 0) / ts.length : 15;
-  return insetPolygon(r.points, t / 2);
+  // Raumfläche = Polygon auf Wandachsen, je Seite um die halbe Stärke der Wand dort nach innen versetzt
+  // (Seiten ohne Wand, z.B. offener Übergang zur Küche, bleiben auf der Achse)
+  const n = r.points.length;
+  const d = r.points.map((a, i) => {
+    const b = r.points[(i + 1) % n];
+    let half = 0;
+    for (const w of p.walls) if (wallOnEdge(w, a, b)) half = Math.max(half, w.thickness / 2);
+    return half;
+  });
+  return insetPolygon(r.points, d);
+}
+
+/** Liegt die Wand auf der Kante a→b (gleiche Achse, überlappend)? */
+function wallOnEdge(w: Wall, a: P, b: P): boolean {
+  const L = Math.hypot(b.x - a.x, b.y - a.y);
+  if (L < 1) return false;
+  const ux = (b.x - a.x) / L;
+  const uy = (b.y - a.y) / L;
+  const off = (q: P) => Math.abs((q.x - a.x) * uy - (q.y - a.y) * ux);
+  if (off(w.a) > 1 || off(w.b) > 1) return false;
+  const t0 = (w.a.x - a.x) * ux + (w.a.y - a.y) * uy;
+  const t1 = (w.b.x - a.x) * ux + (w.b.y - a.y) * uy;
+  return Math.min(Math.max(t0, t1), L) - Math.max(Math.min(t0, t1), 0) > 1;
 }
 
 export { newItemFromEntry, ceilingHeight } from './items';
