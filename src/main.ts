@@ -1,5 +1,5 @@
 import './style.css';
-import { store } from './store';
+import { store, emptyProject } from './store';
 import { Plan2D, type Tool } from './plan2d';
 import { View3D } from './view3d';
 import { h, download, openModal, closeModal, modalOpen } from './dom';
@@ -236,8 +236,7 @@ $('btnNew').onclick = () => {
       h('p', {}, 'Möchtest du mit einem leeren Projekt beginnen? Das aktuelle Projekt wird ersetzt (vorher ggf. „Speichern“).'),
       h('div', { class: 'btnrow' },
         h('button', { onclick: closeModal }, 'Abbrechen'),
-        h('button', { class: 'primary', onclick: async () => {
-          const { emptyProject } = await import('./store');
+        h('button', { class: 'primary', onclick: () => {
           const p = emptyProject();
           p.customCatalog = store.project.customCatalog;
           p.site = { ...p.site, lat: store.project.site.lat, lon: store.project.site.lon, tz: store.project.site.tz, north: store.project.site.north };
