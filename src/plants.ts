@@ -142,8 +142,10 @@ function matchScore(q: string, cand: string): number {
   const allowed = q.length >= 8 ? 2 : q.length >= 4 ? 1 : 0;
   if (!allowed) return 0;
   let best = lev(q, cand);
-  for (const w of words) best = Math.min(best, lev(q, w), lev(q, w.slice(0, q.length)));
-  best = Math.min(best, lev(q, cand.slice(0, q.length)));
+  // Tippfehler am Wortanfang erst ab 5 Zeichen zulassen (sonst findet „farn“ auch „carnosa“)
+  const prefix = q.length >= 5;
+  for (const w of words) best = Math.min(best, lev(q, w), prefix ? lev(q, w.slice(0, q.length)) : Infinity);
+  if (prefix) best = Math.min(best, lev(q, cand.slice(0, q.length)));
   return best <= allowed ? 55 - best * 5 : 0;
 }
 
