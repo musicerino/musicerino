@@ -2,6 +2,27 @@
 
 Ein Werkzeug im Browser, mit dem du Räume nachbaust und einrichtest. Du zeichnest den Grundriss in 2D und siehst ihn gleichzeitig in 3D. Möbel stellst du aus einem IKEA-Katalog oder als eigene Maßanfertigung hinein. Außerdem kannst du den Sonnenstand für deinen Standort simulieren.
 
+## Als App auf dem iPad (offline)
+
+Der Raumplaner ist eine installierbare Web-App (PWA). Nach dem ersten Öffnen liegt alles auf dem Gerät, danach brauchst du kein Internet mehr.
+
+1. **Einmalig GitHub Pages einschalten:** im Repository unter *Settings → Pages → Build and deployment → Source* die Option **„GitHub Actions“** wählen. Danach baut der Workflow `.github/workflows/pages.yml` die App bei jedem Push automatisch und veröffentlicht sie unter `https://<github-name>.github.io/musicerino/`.
+2. Die Adresse auf dem iPad in **Safari** öffnen.
+3. **Teilen-Symbol → „Zum Home-Bildschirm“** wählen. Danach startet der Raumplaner über das Symbol im Vollbild und offline.
+
+Auf Android sowie in Chrome und Edge am Computer erscheint oben der Knopf **„App installieren“**.
+
+**Touch-Bedienung:**
+- Ein Finger wählt aus und verschiebt.
+- Zwei Finger zoomen und verschieben den Plan.
+- In 3D tippst du ein Möbel erst an und ziehst es dann.
+- Beim Wand-Werkzeug erscheint eine Leiste: Länge eingeben und Richtungspfeil antippen.
+- Für die Auswahl gibt es eine Leiste mit Drehen, Kopie, Eigenschaften und Löschen.
+- Im Rundgang steuerst du mit dem Joystick.
+- Die Seitenleisten öffnest du über ◧ und ◨.
+
+**Daten:** Projekte bleiben auf dem Gerät gespeichert. Sichere wichtige Pläne zusätzlich über „Speichern“, z.B. in der Dateien-App oder in iCloud. Mit „Öffnen“ lädst du sie wieder.
+
 ## Starten
 
 ```bash

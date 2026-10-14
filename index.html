@@ -2,12 +2,22 @@
 <html lang="de">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Raumplaner" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
     <title>Raumplaner</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='3' width='26' height='26' rx='6' fill='%232f7cf6'/%3E%3Cpath d='M9 22V10h14v12' fill='none' stroke='white' stroke-width='3'/%3E%3C/svg%3E" />
   </head>
   <body>
     <header class="topbar">
+      <button id="btnLeft" class="icon panel-toggle" title="Seitenleiste: Raum, Möbel, Oberflächen, Sonne" aria-pressed="true">
+        <svg viewBox="0 0 20 20" width="18" height="18"><rect x="2" y="3" width="16" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="2" y="3" width="6" height="14" rx="1.5" fill="currentColor"/></svg>
+      </button>
       <div class="brand">
         <svg width="22" height="22" viewBox="0 0 32 32"><rect x="3" y="3" width="26" height="26" rx="6" fill="currentColor" /><path d="M9 22V10h14v12" fill="none" stroke="white" stroke-width="3" /></svg>
         <span>Raumplaner</span>
@@ -23,17 +33,23 @@
         <button data-view="3d">3D</button>
       </div>
       <div class="spacer"></div>
-      <div class="group">
+      <button id="btnInstall" class="primary" hidden title="Raumplaner als App installieren">App installieren</button>
+      <span id="offlineBadge" class="badge" hidden>Offline</span>
+      <div class="group files">
         <button id="btnNew" title="Neues, leeres Projekt">Neu</button>
         <button id="btnOpen" title="Projektdatei (.json) öffnen">Öffnen</button>
         <button id="btnSave" title="Projekt als Datei speichern">Speichern</button>
         <button id="btnShot" title="Bild der aktuellen Ansicht speichern">Bild</button>
-        <button id="btnHelp" class="icon" title="Hilfe">?</button>
       </div>
+      <button id="btnMenu" class="icon menu-btn" title="Datei-Menü">⋯</button>
+      <button id="btnHelp" class="icon" title="Hilfe">?</button>
+      <button id="btnRight" class="icon panel-toggle" title="Eigenschaften der Auswahl" aria-pressed="true">
+        <svg viewBox="0 0 20 20" width="18" height="18"><rect x="2" y="3" width="16" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="12" y="3" width="6" height="14" rx="1.5" fill="currentColor"/></svg>
+      </button>
       <input type="file" id="fileInput" accept=".json,application/json" hidden />
     </header>
 
-    <div class="main">
+    <div class="main" id="main">
       <aside class="sidebar">
         <nav class="tabs" id="tabs">
           <button data-tab="raum" class="active">Raum</button>
@@ -53,10 +69,14 @@
         <div class="pane pane2d" id="pane2d">
           <div class="toolbar" id="toolbar2d"></div>
           <div class="canvas-host" id="plan"></div>
+          <div class="touchbar" id="wallbar" hidden></div>
+          <div class="touchbar selbar" id="selbar" hidden></div>
         </div>
         <div class="pane pane3d" id="pane3d">
           <div class="toolbar" id="toolbar3d"></div>
-          <div class="canvas-host" id="view3d"></div>
+          <div class="canvas-host" id="view3d">
+            <div class="joystick" id="joystick" hidden><div class="knob"></div></div>
+          </div>
           <div class="timebar" id="timebar"></div>
         </div>
       </section>

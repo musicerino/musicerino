@@ -16,6 +16,7 @@ export interface Ctx {
   plan: Plan2D;
   view: View3D;
   status: (s: string) => void;
+  afterInsert?: () => void;
 }
 
 export function allEntries(): CatalogEntry[] {
@@ -239,6 +240,7 @@ export function renderFurnitureTab(el: HTMLElement, ctx: Ctx) {
       );
       card.addEventListener('click', () => {
         ctx.plan.placeEntry(e, smartSpot(ctx));
+        ctx.afterInsert?.();
         ctx.status(`${e.name} eingefügt – im Plan oder in 3D verschieben, mit R drehen.`);
       });
       card.addEventListener('dragstart', (ev) => {

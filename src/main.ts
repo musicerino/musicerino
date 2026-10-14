@@ -9,6 +9,8 @@ import { settings, stackedOn, rotateItemTo, moveItemTo } from './ops';
 import { ui, requestRedraw } from './shared';
 import { sunTimes, siteSun, fmtTime, compassName } from './sun';
 import type { Project } from './types';
+import { initPWA, isStandalone } from './pwa';
+import { initPanels, initMenu, initWallBar, initSelectionBar, initJoystick, afterInsert, saveProject, COARSE } from './touch';
 
 const $ = (id: string) => document.getElementById(id)!;
 const statusEl = $('status');
@@ -20,7 +22,7 @@ plan.findEntry = findEntry;
 view.findEntry = findEntry;
 plan.onStatus = status;
 view.onStatus = status;
-const ctx: Ctx = { plan, view, status };
+const ctx: Ctx = { plan, view, status, afterInsert };
 
 // ------------------------------------------------------------- Seitenleiste
 renderRoomTab($('tab-raum'), ctx);
@@ -115,8 +117,13 @@ const modeOrbit = h('button', { class: 'active', onclick: () => setMode('orbit')
 const modeWalk = h('button', { onclick: () => setMode('walk') }, 'Rundgang');
 function setMode(m: 'orbit' | 'walk') {
   view.setMode(m);
+  showJoystick(m === 'walk' && COARSE.matches);
   modeOrbit.classList.toggle('active', m === 'orbit');
   modeWalk.classList.toggle('active', m === 'walk');
+  if (COARSE.matches) {
+    status(m === 'walk' ? 'Rundgang: Joystick unten links = gehen, mit dem Finger wischen = umsehen.' : '3D: Ein Finger dreht, zwei Finger zoomen/verschieben. Möbel antippen, dann ziehen – auf andere Möbel ziehen zum Stapeln.');
+    return;
+  }
   status(m === 'walk' ? 'Rundgang: Maus ziehen = umsehen, W/A/S/D oder Pfeiltasten = gehen, Shift = schneller, Mausrad = Brennweite. Erst in die 3D-Ansicht klicken.' : '3D: Linke Maustaste = drehen, rechte = verschieben, Rad = zoomen. Möbel anklicken und ziehen – auf andere Möbel ziehen zum Stapeln.');
 }
 tb3.append(
@@ -246,8 +253,7 @@ $('btnNew').onclick = () => {
 };
 $('btnSave').onclick = () => {
   const name = (store.project.name || 'raumplan').replace(/[^\wäöüÄÖÜß -]+/g, '').trim() || 'raumplan';
-  download(`${name}.raumplan.json`, JSON.stringify(store.project, null, 1));
-  status('Projekt als Datei gespeichert. Zusätzlich wird automatisch im Browser gespeichert.');
+  void saveProject(name, JSON.stringify(store.project, null, 1), status, download);
 };
 const fileInput = $('fileInput') as HTMLInputElement;
 $('btnOpen').onclick = () => fileInput.click();
@@ -297,6 +303,8 @@ function showHelp() {
           h('p', {}, 'Material & Farbe für alle Wände, einzelne Wände und jeden Boden.'),
           h('h4', {}, '5 · Licht & Sonne'),
           h('p', {}, 'Koordinaten des Hauses eingeben (z.B. aus Google Maps: Rechtsklick → Koordinaten kopieren) und Norden ausrichten – per Kompass im Plan oder Regler. Unter der 3D-Ansicht Datum und Uhrzeit wählen oder ▶ für den Tagesverlauf. Die Sonnenstunden-Karte zeigt, wo wie lange Sonne hinfällt.'),
+          h('h4', {}, 'iPad & Touch'),
+          h('p', {}, 'Ein Finger verschiebt Möbel und Wände, zwei Finger zoomen und verschieben den Plan. In 3D Möbel erst antippen, dann ziehen. Beim Wand-Werkzeug erscheint unten eine Leiste: Länge eingeben und Richtungspfeil antippen. Die Knöpfe ◧ und ◨ oben öffnen die Seitenleisten. Als App installieren: „App installieren“ oben bzw. Safari → Teilen → „Zum Home-Bildschirm“.'),
           h('h4', {}, 'Speichern'),
           h('p', {}, 'Alles wird automatisch im Browser gespeichert. „Speichern“ lädt zusätzlich eine Projektdatei herunter, die du mit „Öffnen“ wieder lädst. „Bild“ speichert die aktuelle Ansicht als PNG.'),
         ),
@@ -370,6 +378,18 @@ window.addEventListener('keydown', (e) => {
   if (t) plan.setTool(t);
 });
 
+// ------------------------------------------------------------- Touch, Seitenleisten, App
+const showJoystick = initJoystick(view);
+initPanels(() => {
+  plan.resize();
+  view.resize();
+});
+initMenu();
+initWallBar(plan);
+initSelectionBar(plan);
+initPWA(status);
+if (window.innerWidth < 700) setView('2d');
+
 // Erststart-Hinweis
 let seenHelp = false;
 try {
@@ -379,7 +399,7 @@ try {
   /* Speicher nicht verfügbar */
 }
 if (!seenHelp) setTimeout(showHelp, 400);
-status('Bereit. Tipp: „?“ oben rechts zeigt die Kurzanleitung.');
+status(isStandalone() ? 'Bereit – läuft als App, auch offline.' : 'Bereit. Tipp: „?“ oben rechts zeigt die Kurzanleitung.');
 
 // Für Fehlersuche / Power-User in der Browser-Konsole
 (window as unknown as Record<string, unknown>).raumplaner = { store, plan, view };

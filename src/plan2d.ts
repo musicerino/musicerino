@@ -49,6 +49,13 @@ export class Plan2D {
   private drag: Drag | null = null;
   private hoverWall: { w: Wall; s: number } | null = null;
   private shift = false;
+  /** Vergrößerung der Trefferflächen: Finger 2,5×, Stift 1,6×, Maus 1× */
+  private tf = 1;
+  private touches = new Map<number, P>();
+  private pinch: { d0: number; scale0: number; wMid: P } | null = null;
+  private pinched = false;
+  private tap: { x: number; y: number } | null = null;
+  onChainChange: () => void = () => {};
   private spaceDown = false;
   private dpr = 1;
   private measure: { a: P; b: P } | null = null;
@@ -132,7 +139,15 @@ export class Plan2D {
       french: 'Balkon-/Terrassentür: Auf eine Wand klicken.',
       measure: 'Messen: Ziehen, um eine Strecke zu messen.',
     };
-    this.onStatus(hints[t]);
+    const touch = window.matchMedia('(pointer: coarse)').matches;
+    const touchHints: Partial<Record<Tool, string>> = {
+      select: 'Antippen = auswählen, mit einem Finger ziehen = verschieben, zwei Finger = zoomen und Plan verschieben.',
+      wall: 'Wände: Punkte antippen – oder unten Länge eingeben und Richtungspfeil antippen. Antippen des Startpunkts schließt den Raum.',
+      window: 'Fenster: Auf eine Wand tippen.',
+      door: 'Tür: Auf eine Wand tippen.',
+      french: 'Balkon-/Terrassentür: Auf eine Wand tippen.',
+    };
+    this.onStatus((touch && touchHints[t]) || hints[t]);
     this.draw();
   }
 
@@ -147,7 +162,7 @@ export class Plan2D {
 
   private snap(raw: P, from?: P): P {
     this.guides = {};
-    const tol = 12 / this.scale;
+    const tol = (12 * this.tf) / this.scale;
     // 1. Knoten
     let best: P | null = null;
     let bd = tol;
@@ -207,12 +222,12 @@ export class Plan2D {
 
   private hitItem(p: P): Item | null {
     const items = [...store.project.items].sort((a, b) => b.z + b.h - (a.z + a.h) || a.w * a.d - b.w * b.d);
-    for (const it of items) if (pointInItem(it, p, 2 / this.scale)) return it;
+    for (const it of items) if (pointInItem(it, p, (2 * this.tf) / this.scale)) return it;
     return null;
   }
 
   private rotHandle(it: Item): P {
-    const off = it.d / 2 + 22 / this.scale;
+    const off = it.d / 2 + (this.tf > 1 ? 36 : 22) / this.scale;
     return add({ x: it.x, y: it.y }, rotCW({ x: 0, y: -off }, it.rot));
   }
 
@@ -220,7 +235,7 @@ export class Plan2D {
     let best: { w: Wall; s: number; d: number } | null = null;
     for (const w of store.project.walls) {
       const pr = projectOnSegment(p, w.a, w.b);
-      const lim = w.thickness / 2 + tolPx / this.scale;
+      const lim = w.thickness / 2 + (tolPx * this.tf) / this.scale;
       if (pr.d <= lim && (!best || pr.d < best.d)) best = { w, s: pr.s, d: pr.d };
     }
     return best ? { w: best.w, s: best.s } : null;
@@ -231,13 +246,13 @@ export class Plan2D {
       const w = store.wall(o.wallId);
       if (!w) continue;
       const pr = projectOnSegment(p, w.a, w.b);
-      if (pr.d <= w.thickness / 2 + 4 / this.scale && Math.abs(pr.s - o.offset) <= o.width / 2) return o;
+      if (pr.d <= w.thickness / 2 + (4 * this.tf) / this.scale && Math.abs(pr.s - o.offset) <= o.width / 2) return o;
     }
     return null;
   }
 
   private hitNode(p: P): P | null {
-    const tol = 9 / this.scale;
+    const tol = (9 * this.tf) / this.scale;
     for (const n of this.nodes()) if (dist(n, p) < tol) return n;
     return null;
   }
@@ -269,10 +284,10 @@ export class Plan2D {
       this.draw();
     }, { passive: false });
 
-    c.addEventListener('pointerdown', (e) => this.down(e));
-    c.addEventListener('pointermove', (e) => this.move(e));
-    c.addEventListener('pointerup', (e) => this.up(e));
-    c.addEventListener('pointercancel', (e) => this.up(e));
+    c.addEventListener('pointerdown', (e) => this.onDown(e));
+    c.addEventListener('pointermove', (e) => this.onMove(e));
+    c.addEventListener('pointerup', (e) => this.onUp(e));
+    c.addEventListener('pointercancel', (e) => this.onUp(e, true));
     c.addEventListener('dblclick', (e) => this.dbl(e));
     c.addEventListener('dragover', (e) => e.preventDefault());
     c.addEventListener('drop', (e) => {
@@ -355,6 +370,141 @@ export class Plan2D {
     return false;
   }
 
+  // ---------------------------------------------------------------- Touch
+
+  /** Werkzeuge, bei denen ein Fingertipp erst beim Loslassen zählt (damit Zwei-Finger-Gesten nichts setzen). */
+  private tapTool() {
+    return this.tool === 'wall' || this.tool === 'window' || this.tool === 'door' || this.tool === 'french';
+  }
+
+  private onDown(e: PointerEvent) {
+    this.tf = e.pointerType === 'touch' ? 2.5 : e.pointerType === 'pen' ? 1.6 : 1;
+    if (e.pointerType === 'touch') {
+      this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      try {
+        this.canvas.setPointerCapture(e.pointerId);
+      } catch {
+        /* egal */
+      }
+      if (this.touches.size === 1) this.pinched = false;
+      if (this.touches.size === 2) {
+        this.startPinch();
+        return;
+      }
+      if (this.touches.size > 2) return;
+      if (this.tapTool()) {
+        this.tap = { x: e.clientX, y: e.clientY };
+        this.canvas.focus();
+        return;
+      }
+    }
+    this.down(e);
+  }
+
+  private onMove(e: PointerEvent) {
+    if (e.pointerType === 'touch' && this.touches.has(e.pointerId)) {
+      this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (this.pinch) {
+        this.doPinch();
+        return;
+      }
+      if (this.tap) return;
+    }
+    this.move(e);
+  }
+
+  private onUp(e: PointerEvent, cancel = false) {
+    if (e.pointerType === 'touch') {
+      this.touches.delete(e.pointerId);
+      if (this.pinch || this.pinched) {
+        if (this.touches.size < 2) this.pinch = null;
+        if (this.touches.size === 0) this.pinched = false;
+        return;
+      }
+      const t = this.tap;
+      this.tap = null;
+      if (t) {
+        if (!cancel && Math.hypot(e.clientX - t.x, e.clientY - t.y) < 14) {
+          // Tipp wie einen Klick behandeln
+          const { w } = this.evtPos(e);
+          this.cursor = this.tool === 'wall' ? this.snap(w, this.chain[this.chain.length - 1]) : w;
+          this.hoverWall = this.hitWall(w, 10);
+          this.down(e);
+          this.drag = null;
+        }
+        return;
+      }
+    }
+    this.up(e);
+  }
+
+  private startPinch() {
+    // laufenden Ziehvorgang sauber beenden
+    const d = this.drag;
+    if (d && ((d.kind === 'item' || d.kind === 'node' || d.kind === 'wall' || d.kind === 'opening') && d.moved)) store.commit();
+    if (d && d.kind === 'rotate') store.commit();
+    this.drag = null;
+    this.tap = null;
+    this.guides = {};
+    const [a, b] = [...this.touches.values()];
+    const r = this.canvas.getBoundingClientRect();
+    const mid = { x: (a.x + b.x) / 2 - r.left, y: (a.y + b.y) / 2 - r.top };
+    this.pinch = { d0: Math.max(10, Math.hypot(a.x - b.x, a.y - b.y)), scale0: this.scale, wMid: this.toWorld(mid.x, mid.y) };
+    this.pinched = true;
+  }
+
+  private doPinch() {
+    const pz = this.pinch;
+    if (!pz || this.touches.size < 2) return;
+    const [a, b] = [...this.touches.values()];
+    const r = this.canvas.getBoundingClientRect();
+    const mid = { x: (a.x + b.x) / 2 - r.left, y: (a.y + b.y) / 2 - r.top };
+    const d = Math.max(10, Math.hypot(a.x - b.x, a.y - b.y));
+    this.scale = clamp((pz.scale0 * d) / pz.d0, 0.05, 10);
+    this.ox = mid.x - pz.wMid.x * this.scale;
+    this.oy = mid.y - pz.wMid.y * this.scale;
+    this.draw();
+  }
+
+  // ---------------------------------------------------------------- Wände per Touch-Leiste
+
+  get chainCount() {
+    return this.chain.length;
+  }
+
+  /** Hängt eine Wand mit Länge (cm) und Richtung (Grad, 0 = rechts, 90 = oben) an. */
+  addSegment(length: number, angleDeg: number) {
+    if (!this.chain.length) this.chain.push(this.snap(this.viewCenter));
+    const from = this.chain[this.chain.length - 1];
+    const a = (angleDeg * Math.PI) / 180;
+    this.chain.push({ x: round(from.x + Math.cos(a) * length, 0.1), y: round(from.y - Math.sin(a) * length, 0.1) });
+    this.cursor = this.chain[this.chain.length - 1];
+    this.draw();
+  }
+
+  /** Richtung der letzten Wand (Grad), für Winkel relativ dazu. */
+  lastAngle(): number | null {
+    if (this.chain.length < 2) return null;
+    const a = this.chain[this.chain.length - 2];
+    const b = this.chain[this.chain.length - 1];
+    return (Math.atan2(-(b.y - a.y), b.x - a.x) * 180) / Math.PI;
+  }
+
+  undoPoint() {
+    this.chain.pop();
+    this.draw();
+  }
+
+  closeChain() {
+    if (this.chain.length >= 3) this.finishChain(true);
+  }
+
+  finishWalls() {
+    if (this.chain.length >= 2) this.finishChain(false);
+    else this.chain = [];
+    this.draw();
+  }
+
   private evtPos(e: PointerEvent | MouseEvent) {
     const r = this.canvas.getBoundingClientRect();
     const sx = e.clientX - r.left;
@@ -425,7 +575,7 @@ export class Plan2D {
     const sel = store.selection;
     if (sel?.kind === 'item') {
       const it = store.item(sel.id);
-      if (it && !it.locked && dist(this.rotHandle(it), w) < 10 / this.scale) {
+      if (it && !it.locked && dist(this.rotHandle(it), w) < (10 * this.tf) / this.scale) {
         this.drag = { kind: 'rotate', id: it.id, children: stackedOn(store.project, it) };
         this.canvas.setPointerCapture(e.pointerId);
         return;
@@ -581,7 +731,7 @@ export class Plan2D {
   }
 
   private snapExcluding(raw: P, exclude: P): P {
-    const tol = 10 / this.scale;
+    const tol = (10 * this.tf) / this.scale;
     for (const n of this.nodes()) if (!same(n, exclude, 0.5) && dist(n, raw) < tol) return { ...n };
     const step = settings.snapGrid ? settings.gridStep : 0.1;
     let p = { x: round(raw.x, step), y: round(raw.y, step) };
@@ -685,7 +835,7 @@ export class Plan2D {
     else {
       const sel = store.selection;
       const it = sel?.kind === 'item' ? store.item(sel.id) : undefined;
-      if (it && dist(this.rotHandle(it), w) < 10 / this.scale) cur = 'alias';
+      if (it && dist(this.rotHandle(it), w) < (10 * this.tf) / this.scale) cur = 'alias';
       else if (this.hitItem(w)) cur = 'move';
       else if (this.hitNode(w)) cur = 'crosshair';
       else if (this.hitOpening(w)) cur = 'ew-resize';
@@ -765,6 +915,7 @@ export class Plan2D {
   }
 
   private render() {
+    this.onChainChange();
     const ctx = this.ctx;
     const p = store.project;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
@@ -1312,7 +1463,7 @@ export class Plan2D {
         const ang = (Math.atan2(-(end.y - from.y), end.x - from.x) * 180) / Math.PI;
         const label = this.typed ? `Länge: ${this.typed} ⏎` : `${fmtLen(l)} · ${Math.round(((ang % 360) + 360) % 360)}°`;
         this.label(end, label, px, 14, -18);
-      } else this.label(this.cursor, 'Startpunkt klicken', px, 14, -18);
+      } else this.label(this.cursor, 'Startpunkt setzen', px, 14, -18);
     }
     if (this.drag?.kind === 'room') {
       const a = this.drag.start;

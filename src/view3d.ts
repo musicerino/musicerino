@@ -41,6 +41,8 @@ export class View3D {
   showSunPath = true;
   cutaway = true;
   private keys = new Set<string>();
+  /** Bewegung vom Touch-Joystick: x = seitwärts, y = vorwärts, jeweils -1…1 */
+  joy = { x: 0, y: 0 };
   private lastT = performance.now();
   private drag: { item: Item; children: Item[]; startX: number; startY: number; moved: boolean; offset: P } | null = null;
   private walkLook: { x: number; y: number; yaw: number; pitch: number } | null = null;
@@ -620,7 +622,7 @@ export class View3D {
   }
 
   private walkStep(dt: number) {
-    if (!this.keys.size) return;
+    if (!this.keys.size && !this.joy.x && !this.joy.y) return;
     const speed = (this.keys.has('shift') ? 3 : 1.4) * dt;
     const fwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
@@ -629,6 +631,7 @@ export class View3D {
     if (this.keys.has('s') || this.keys.has('arrowdown')) mv.sub(fwd);
     if (this.keys.has('d')) mv.add(right);
     if (this.keys.has('a')) mv.sub(right);
+    if (this.joy.x || this.joy.y) mv.addScaledVector(fwd, this.joy.y).addScaledVector(right, this.joy.x);
     if (this.keys.has('arrowleft')) {
       this.yaw += dt * 1.5;
       this.applyLook();
@@ -638,7 +641,8 @@ export class View3D {
       this.applyLook();
     }
     if (mv.lengthSq() > 0) {
-      mv.normalize().multiplyScalar(speed);
+      const joyMag = Math.min(1, Math.hypot(this.joy.x, this.joy.y));
+      mv.normalize().multiplyScalar(this.keys.size ? speed : 1.6 * dt * joyMag);
       this.camera.position.add(mv);
       this.invalidate();
     }
@@ -673,7 +677,7 @@ export class View3D {
   private bindEvents() {
     const el = this.renderer.domElement;
     el.addEventListener('pointerdown', (e) => {
-      el.focus();
+      el.focus({ preventScroll: true });
       if (this.mode === 'walk') {
         this.walkLook = { x: e.clientX, y: e.clientY, yaw: this.yaw, pitch: this.pitch };
         el.setPointerCapture(e.pointerId);
@@ -683,6 +687,13 @@ export class View3D {
       }
       if (e.button !== 0) return;
       const hit = this.pickItem(e);
+      // Mit dem Finger: erst antippen (auswählen), dann ziehen – sonst könnte man in einem
+      // vollen Raum die Kamera kaum noch drehen.
+      const sel = store.selection;
+      if (hit && e.pointerType === 'touch' && !(sel?.kind === 'item' && sel.id === hit.item.id)) {
+        this.clickStart = { x: e.clientX, y: e.clientY, itemId: hit.item.id };
+        return;
+      }
       if (hit) {
         store.select({ kind: 'item', id: hit.item.id });
         if (hit.item.locked) return;
@@ -700,7 +711,7 @@ export class View3D {
       } else {
         this.clickStart = { x: e.clientX, y: e.clientY };
       }
-    });
+    }, { capture: true });
     el.addEventListener('pointermove', (e) => {
       if (this.walkLook) {
         this.yaw = this.walkLook.yaw - (e.clientX - this.walkLook.x) * 0.004;
@@ -748,7 +759,8 @@ export class View3D {
         this.controls.enabled = true;
         return;
       }
-      if (this.clickStart && Math.hypot(e.clientX - this.clickStart.x, e.clientY - this.clickStart.y) < 4) store.select(null);
+      if (this.clickStart && Math.hypot(e.clientX - this.clickStart.x, e.clientY - this.clickStart.y) < (e.pointerType === 'touch' ? 12 : 4))
+        store.select(this.clickStart.itemId ? { kind: 'item', id: this.clickStart.itemId } : null);
       this.clickStart = null;
     };
     el.addEventListener('pointerup', end);
@@ -789,7 +801,7 @@ export class View3D {
       store.select({ kind: 'item', id: it.id });
     });
   }
-  private clickStart: { x: number; y: number } | null = null;
+  private clickStart: { x: number; y: number; itemId?: string } | null = null;
   findEntry?: (id: string) => CatalogEntry | undefined;
 
   screenshot(): string {

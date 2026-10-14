@@ -25,6 +25,15 @@ body {
   height: 100%;
   background: var(--bg);
   overflow: hidden;
+  overscroll-behavior: none;
+}
+body {
+  display: flex;
+  flex-direction: column;
+  /* iPad/iPhone: Ränder für Statusleiste, Home-Balken und Kamera freihalten */
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 button,
 input,
@@ -107,6 +116,7 @@ input[type='range'] {
 
 /* ---------- Topbar ---------- */
 .topbar {
+  flex: none;
   height: 50px;
   display: flex;
   align-items: center;
@@ -165,7 +175,13 @@ input[type='range'] {
 /* ---------- Layout ---------- */
 .main {
   display: flex;
-  height: calc(100% - 50px - 26px);
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+.main.left-closed .sidebar,
+.main.right-closed .props {
+  display: none;
 }
 .sidebar {
   width: 320px;
@@ -324,6 +340,7 @@ input[type='range'] {
 }
 
 .status {
+  flex: none;
   height: 26px;
   display: flex;
   justify-content: space-between;
@@ -628,48 +645,206 @@ h4 {
   line-height: 1.6;
 }
 
-@media (max-width: 1200px) {
-  .props {
-    width: 250px;
-  }
-  .sidebar {
-    width: 280px;
-  }
-}
-@media (max-width: 900px) {
-  .main {
-    flex-direction: column;
-    height: auto;
-    overflow: auto;
-  }
-  html,
-  body {
-    overflow: auto;
-  }
-  .sidebar,
-  .props {
-    width: 100%;
-    border: none;
-  }
-  .views,
-  .views.split {
-    grid-template-columns: 1fr;
-    min-height: 140vh;
-  }
-  .topbar {
-    flex-wrap: wrap;
-    height: auto;
-    padding: 6px 12px;
-  }
-  .custom-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
 /* Im geteilten Modus Werkzeuge nur als Symbol */
 .views.split .toolbar button.tool span {
   display: none;
 }
 .views.split .toolbar button.tool {
   padding: 5px 7px;
+}
+
+.badge {
+  padding: 3px 9px;
+  border-radius: 99px;
+  background: #fff1d6;
+  color: #8a5a00;
+  font-size: 12px;
+  font-weight: 600;
+}
+.menu-btn {
+  display: none;
+}
+.panel-toggle svg {
+  display: block;
+  margin: auto;
+}
+
+/* ---------- Touch-Leisten im Plan ---------- */
+.views {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.touchbar {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  padding: 7px;
+  max-width: calc(100% - 24px);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.14);
+  z-index: 6;
+}
+.touchbar[hidden] {
+  display: none;
+}
+.touchbar .lenin {
+  width: 110px;
+}
+.touchbar .lbl {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 0 4px;
+}
+.touchbar .dirs {
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  gap: 4px;
+}
+
+/* ---------- Joystick (Rundgang) ---------- */
+.joystick {
+  position: absolute;
+  left: 18px;
+  bottom: 18px;
+  width: 124px;
+  height: 124px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.18);
+  z-index: 6;
+  touch-action: none;
+}
+.joystick[hidden] {
+  display: none;
+}
+.joystick .knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 54px;
+  height: 54px;
+  margin: -27px 0 0 -27px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+/* ---------- Größere Bedienelemente für Finger ---------- */
+@media (pointer: coarse) {
+  button {
+    min-height: 40px;
+    padding: 8px 12px;
+  }
+  button.icon {
+    width: 42px;
+    padding: 8px 0;
+  }
+  .toolbar button {
+    min-height: 40px;
+    padding: 7px 10px;
+  }
+  .seg button {
+    padding: 8px 12px;
+  }
+  .tabs button {
+    padding: 15px 4px;
+  }
+  /* 16px verhindert das automatische Hineinzoomen von iOS beim Tippen in Felder */
+  input[type='text'],
+  input[type='number'],
+  input:not([type]),
+  input[type='date'],
+  select,
+  textarea {
+    font-size: 16px !important;
+    min-height: 40px;
+  }
+  input[type='color'] {
+    width: 42px;
+    height: 40px;
+  }
+  .colors .c {
+    width: 30px;
+    height: 30px;
+    min-height: 0;
+    padding: 0;
+  }
+  .chips button {
+    min-height: 34px;
+  }
+  .swatch {
+    min-height: 0;
+    padding: 0;
+  }
+  input[type='range'] {
+    height: 34px;
+  }
+  .list .li {
+    padding: 11px 12px;
+  }
+}
+
+/* ---------- Schmale Bildschirme (iPad hochkant, Tablet, Handy) ---------- */
+@media (max-width: 1180px) {
+  .sidebar,
+  .props {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 20;
+    width: min(340px, 88vw);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  }
+  .sidebar {
+    left: 0;
+  }
+  .props {
+    right: 0;
+  }
+  .topbar .files {
+    display: none;
+  }
+  .menu-btn {
+    display: inline-block;
+  }
+}
+@media (max-width: 900px) {
+  .views.split {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr;
+  }
+  .brand span {
+    display: none;
+  }
+  .custom-grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 640px) {
+  .project-name {
+    display: none;
+  }
+  .topbar {
+    gap: 6px;
+    padding: 0 8px;
+  }
+  .seg button {
+    padding: 6px 8px;
+  }
+  .toolbar button span {
+    display: none;
+  }
+  .help-grid {
+    grid-template-columns: 1fr;
+  }
 }
