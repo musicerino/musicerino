@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Raumplaner</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='3' width='26' height='26' rx='6' fill='%232f7cf6'/%3E%3Cpath d='M9 22V10h14v12' fill='none' stroke='white' stroke-width='3'/%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <svg width="22" height="22" viewBox="0 0 32 32"><rect x="3" y="3" width="26" height="26" rx="6" fill="currentColor" /><path d="M9 22V10h14v12" fill="none" stroke="white" stroke-width="3" /></svg>
+        <span>Raumplaner</span>
+      </div>
+      <input id="projectName" class="project-name" title="Projektname" />
+      <div class="group">
+        <button id="btnUndo" class="icon" title="Rückgängig (Strg+Z)">↶</button>
+        <button id="btnRedo" class="icon" title="Wiederholen (Strg+Y)">↷</button>
+      </div>
+      <div class="seg" id="viewSeg">
+        <button data-view="2d">2D-Plan</button>
+        <button data-view="split" class="active">Geteilt</button>
+        <button data-view="3d">3D</button>
+      </div>
+      <div class="spacer"></div>
+      <div class="group">
+        <button id="btnNew" title="Neues, leeres Projekt">Neu</button>
+        <button id="btnOpen" title="Projektdatei (.json) öffnen">Öffnen</button>
+        <button id="btnSave" title="Projekt als Datei speichern">Speichern</button>
+        <button id="btnShot" title="Bild der aktuellen Ansicht speichern">Bild</button>
+        <button id="btnHelp" class="icon" title="Hilfe">?</button>
+      </div>
+      <input type="file" id="fileInput" accept=".json,application/json" hidden />
+    </header>
+
+    <div class="main">
+      <aside class="sidebar">
+        <nav class="tabs" id="tabs">
+          <button data-tab="raum" class="active">Raum</button>
+          <button data-tab="moebel">Möbel</button>
+          <button data-tab="material">Oberflächen</button>
+          <button data-tab="sonne">Licht &amp; Sonne</button>
+        </nav>
+        <div class="tabpanels">
+          <section class="tabpanel active" id="tab-raum"></section>
+          <section class="tabpanel" id="tab-moebel"></section>
+          <section class="tabpanel" id="tab-material"></section>
+          <section class="tabpanel" id="tab-sonne"></section>
+        </div>
+      </aside>
+
+      <section class="views split" id="views">
+        <div class="pane pane2d" id="pane2d">
+          <div class="toolbar" id="toolbar2d"></div>
+          <div class="canvas-host" id="plan"></div>
+        </div>
+        <div class="pane pane3d" id="pane3d">
+          <div class="toolbar" id="toolbar3d"></div>
+          <div class="canvas-host" id="view3d"></div>
+          <div class="timebar" id="timebar"></div>
+        </div>
+      </section>
+
+      <aside class="props" id="props"></aside>
+    </div>
+    <footer class="status"><span id="status">Willkommen!</span><span id="statusRight"></span></footer>
+
+    <div class="modal-back" id="modalBack" hidden>
+      <div class="modal" id="modal"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
