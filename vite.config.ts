@@ -54,10 +54,10 @@ self.addEventListener('fetch', (e) => {
       fetch(req)
         .then((res) => {
           const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put('./', copy));
+          caches.open(CACHE).then((c) => c.put(req, copy));
           return res;
         })
-        .catch(() => caches.match('./').then((r) => r || caches.match('./index.html'))),
+        .catch(() => caches.match(req).then((r) => r || caches.match('./')).then((r) => r || caches.match('./index.html'))),
     );
     return;
   }

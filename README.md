@@ -23,6 +23,15 @@ Auf Android sowie in Chrome und Edge am Computer erscheint oben der Knopf **„A
 
 **Daten:** Projekte bleiben auf dem Gerät gespeichert. Sichere wichtige Pläne zusätzlich über „Speichern“, z.B. in der Dateien-App oder in iCloud. Mit „Öffnen“ lädst du sie wieder.
 
+## Spiel: Klangmurmel
+
+`public/klangmurmel.html` ist ein kleines Geschicklichkeitsspiel. Es wird mit der Web-App veröffentlicht und läuft unter `https://musicerino.github.io/musicerino/klangmurmel.html`.
+
+- Du rollst eine Murmel, indem du das Handy neigst oder einen Finger aufs Feld hältst.
+- Jede gesammelte Note spielt einen Ton. Wenn du schnell hintereinander sammelst, steigt die Combo und die Melodie wird höher.
+- Doppelt tippen oder laut klatschen löst eine Schockwelle gegen die Stacheln aus. Fürs Klatschen musst du vorher im Menü das Mikrofon einschalten.
+- Auf dem iPhone fragt Safari beim ersten Start, ob das Spiel den Bewegungssensor benutzen darf.
+
 ## Starten
 
 ```bash
